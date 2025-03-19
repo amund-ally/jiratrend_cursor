@@ -172,3 +172,9 @@ cython_debug/
 
 # PyPI configuration file
 .pypirc
+
+# Project specific
+jira.config
+project_progress.png
+*.pyc
+venv/
