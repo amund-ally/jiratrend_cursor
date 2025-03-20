@@ -59,25 +59,59 @@ def process_estimate_changes(issues: List) -> Tuple[Dict, Dict]:
     """Process estimate changes from issue changelogs."""
     estimate_changes: Dict = {}
     current_estimates: Dict = {}
+    initial_estimates: Dict = {}
     
     for issue in issues:
+        # Get the initial estimate from the issue's current state
         current_estimate = issue.fields.timeoriginalestimate / (3600 * 8) if issue.fields.timeoriginalestimate else 0
-        current_estimates[issue.key] = current_estimate
-
+        
+        # Initialize the estimate changes with the current estimate
         if START_DATE.date() not in estimate_changes:
             estimate_changes[START_DATE.date()] = {}
         estimate_changes[START_DATE.date()][issue.key] = current_estimate
+        current_estimates[issue.key] = current_estimate
         
+        # Process changelog to find the estimate as of March 12th
+        initial_estimate = 0  # Start with 0 by default
+        
+        # First, find the most recent estimate before March 12th
+        pre_start_estimates = []
         for history in issue.changelog.histories:
-            for item in history.items:
-                if item.field == 'timeoriginalestimate':
-                    change_date = pd.to_datetime(history.created).date()
-                    new_estimate = float(item.toString) / (3600 * 8) if item.toString else 0
-                    
-                    if change_date not in estimate_changes:
-                        estimate_changes[change_date] = {}
-                    estimate_changes[change_date][issue.key] = new_estimate
-                    current_estimates[issue.key] = new_estimate
+            history_datetime = pd.to_datetime(history.created)
+            if history_datetime.date() <= START_DATE.date():
+                for item in history.items:
+                    if item.field == 'timeoriginalestimate':
+                        estimate = float(item.toString) / (3600 * 8) if item.toString else 0
+                        pre_start_estimates.append((history_datetime, estimate))
+        
+        # Sort by datetime and get the most recent estimate before March 12th
+        if pre_start_estimates:
+            pre_start_estimates.sort(key=lambda x: x[0], reverse=True)
+            initial_estimate = pre_start_estimates[0][1]
+        
+        # Then process changes after March 12th
+        post_start_changes = []
+        for history in issue.changelog.histories:
+            history_datetime = pd.to_datetime(history.created)
+            if history_datetime.date() > START_DATE.date():
+                for item in history.items:
+                    if item.field == 'timeoriginalestimate':
+                        new_estimate = float(item.toString) / (3600 * 8) if item.toString else 0
+                        post_start_changes.append((history_datetime, new_estimate))
+        
+        # Sort post-start changes by datetime and apply them
+        post_start_changes.sort(key=lambda x: x[0])
+        for change_datetime, new_estimate in post_start_changes:
+            change_date = change_datetime.date()
+            if change_date not in estimate_changes:
+                estimate_changes[change_date] = {}
+            estimate_changes[change_date][issue.key] = new_estimate
+            current_estimates[issue.key] = new_estimate
+        
+        initial_estimates[issue.key] = initial_estimate
+    
+    # Set the initial estimates for March 12th
+    estimate_changes[START_DATE.date()] = initial_estimates
     
     return estimate_changes, current_estimates
 
@@ -87,7 +121,12 @@ def create_scope_dataframe(estimate_changes: Dict) -> pd.DataFrame:
     running_estimates = {}
     sorted_dates = sorted(estimate_changes.keys())
     
+    # Initialize with the first date's estimates
+    if sorted_dates:
+        running_estimates = estimate_changes[sorted_dates[0]].copy()
+    
     for date in sorted_dates:
+        # Update running estimates with any changes for this date
         for issue_key, new_estimate in estimate_changes[date].items():
             running_estimates[issue_key] = new_estimate
         
@@ -309,7 +348,7 @@ def add_interactive_annotations(ax: plt.Axes, fig: plt.Figure,
             annotations['line'].set_text(f"{date.strftime('%Y-%m-%d')}\n{value:.1f} days")
             annotations['line'].set_visible(True)
         elif scope_distance < threshold:
-            annotations['scope'].xy = (scope_x-6.5, scope_y-7)
+            annotations['scope'].xy = (scope_x, scope_y-7)
             annotations['scope'].set_text(f"Total Scope\n{scope_y:.1f} days")
             annotations['scope'].set_visible(True)
         elif completion_distance < threshold:
