@@ -122,9 +122,9 @@ ORDER BY statusCategory ASC'''
                 st.session_state.api_key = ""
             
             # Input fields using session state
-            server_url = st.text_input("JIRA Server URL", value=st.session_state.server_url)
-            username = st.text_input("Username", value=st.session_state.username)
-            api_key = st.text_input("API Key", value=st.session_state.api_key, type="password")
+            server_url = st.text_input("JIRA Server URL", key="server_url_input", value=st.session_state.server_url)
+            username = st.text_input("Username", key="username_input", value=st.session_state.username)
+            api_key = st.text_input("API Key", key="api_key_input", value=st.session_state.api_key, type="password")
             
             col1, col2 = st.columns(2)
             
@@ -132,10 +132,12 @@ ORDER BY statusCategory ASC'''
                 if st.button("Load JIRA Config"):
                     try:
                         config = JiraConfig.from_config_file()
+                        # Update session state values
                         st.session_state.server_url = config.server_url
                         st.session_state.username = config.username
                         st.session_state.api_key = config.api_key
-                        st.success("JIRA configuration loaded!")
+                        # Force a rerun to update the input fields
+                        st.rerun()
                     except Exception as e:
                         st.error(f"Error loading JIRA configuration: {str(e)}")
             
