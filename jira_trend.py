@@ -171,24 +171,48 @@ def get_jira_data() -> Tuple[pd.DataFrame, pd.DataFrame]:
     
     return completed_df, scope_df
 
-def calculate_trend_line(valid_data: pd.DataFrame) -> Tuple[Optional[np.poly1d], Optional[datetime]]:
-    """Calculate trend line and intersection point."""
+def calculate_trend_line(valid_data: pd.DataFrame) -> Tuple[Optional[np.poly1d], Optional[datetime], Optional[Tuple[np.poly1d, np.poly1d]]]:
+    """Calculate trend line based on total work completed over the period."""
     if len(valid_data) <= 1:
-        return None, END_DATE
+        print("\nTrend calculation: Not enough data points")
+        return None, END_DATE, None
     
-    x = np.array([mdates.date2num(d) for d in valid_data['duedate']])
-    y = valid_data['cumulative_sum'].values
+    # Get only the days where work was completed
+    completed_days = valid_data[valid_data['originalestimate'] > 0].copy()
+    if len(completed_days) < 2:
+        print("Not enough days with completed work")
+        return None, END_DATE, None
     
-    x_diff = x[-1] - x[0]
-    y_diff = y[-1] - y[0]
-    slope = y_diff / x_diff if x_diff != 0 else 0
-    intercept = y[0] - slope * x[0]
+    # Calculate total work and days elapsed
+    total_work = completed_days['originalestimate'].sum()
+    first_day = completed_days['duedate'].min()
+    last_day = completed_days['duedate'].max()
+    days_elapsed = (last_day - first_day).days + 1  # +1 to include both start and end days
     
-    if slope <= 0 or slope >= 100:
-        return None, END_DATE
+    # Calculate average velocity
+    velocity = total_work / days_elapsed
     
-    trend_line = np.poly1d([slope, intercept])
-    return trend_line, None  # Intersection date will be calculated later
+    print("\nVelocity calculation:")
+    print(f"Total work completed: {total_work:.1f} days")
+    print(f"Days elapsed: {days_elapsed}")
+    print(f"Average velocity: {velocity:.2f} days/day")
+    print(f"First completion: {first_day}")
+    print(f"Last completion: {last_day}")
+    
+    # Create the main trend line
+    trend_line = np.poly1d([velocity, 0])
+    
+    # Calculate a reasonable range for daily velocity variation
+    # Using 20% of the average velocity as a reasonable variation
+    variation = velocity * 0.2
+    upper_line = np.poly1d([velocity + variation, 0])
+    lower_line = np.poly1d([velocity - variation, 0])
+    
+    print(f"\nTrend line: y = {velocity:.4f}x")
+    print(f"Upper bound: y = {(velocity + variation):.4f}x")
+    print(f"Lower bound: y = {(velocity - variation):.4f}x")
+    
+    return trend_line, None, (upper_line, lower_line)
 
 def create_chart(df: pd.DataFrame, scope_df: pd.DataFrame) -> None:
     """Create and display the progress chart."""
@@ -217,14 +241,18 @@ def create_chart(df: pd.DataFrame, scope_df: pd.DataFrame) -> None:
     
     # Calculate trend line
     valid_data = complete_df[complete_df['cumulative_sum'] > 0].copy()
-    trend_line, intersect_date = calculate_trend_line(valid_data)
+    print("\nData for trend line calculation:")
+    print(f"Total rows: {len(complete_df)}")
+    print(f"Rows with cumulative sum > 0: {len(valid_data)}")
+    trend_line, intersect_date, confidence_intervals = calculate_trend_line(valid_data)
     
     # Create the plot
     fig, ax = plt.subplots(figsize=(12, 6))
     
     # Plot data
     plot_data(ax, complete_df, scope_df, trend_line, valid_data, 
-              completion_date, today_scope, today, expected_progress, intersect_date)
+              completion_date, today_scope, today, expected_progress, intersect_date,
+              confidence_intervals)
     
     # Add interactivity
     add_interactive_annotations(ax, fig, complete_df, scope_df, 
@@ -238,7 +266,8 @@ def plot_data(ax: plt.Axes, complete_df: pd.DataFrame, scope_df: pd.DataFrame,
               trend_line: Optional[np.poly1d], valid_data: pd.DataFrame,
               completion_date: datetime, today_scope: float,
               today: datetime, expected_progress: float,
-              intersect_date: Optional[datetime]) -> None:
+              intersect_date: Optional[datetime],
+              confidence_intervals: Optional[Tuple[np.poly1d, np.poly1d]] = None) -> None:
     """Plot all data on the chart."""
     # Plot cumulative line
     line, = ax.plot(complete_df['duedate'], complete_df['cumulative_sum'], 
@@ -246,12 +275,25 @@ def plot_data(ax: plt.Axes, complete_df: pd.DataFrame, scope_df: pd.DataFrame,
     ax.fill_between(complete_df['duedate'], complete_df['cumulative_sum'], 
                     alpha=0.3, color='blue')
     
-    # Plot trend line
+    # Plot velocity trend line and confidence intervals
     if trend_line is not None:
-        trend_x = np.array([mdates.date2num(d) for d in complete_df['duedate']])
-        trend_y = trend_line(trend_x)
-        ax.plot(complete_df['duedate'], trend_y, 
-                label='Trend Line', color='orange', linestyle='--', alpha=1.0)
+        # Calculate days from start for each date
+        days_from_start = [(d - START_DATE).days for d in complete_df['duedate']]
+        trend_values = trend_line(days_from_start)
+        
+        # Plot the main trend line
+        ax.plot(complete_df['duedate'], trend_values, 
+                label='Current Velocity Projection', color='orange', linestyle='--', alpha=1.0)
+        
+        # Plot confidence intervals if available
+        if confidence_intervals is not None:
+            upper_line, lower_line = confidence_intervals
+            upper_values = upper_line(days_from_start)
+            lower_values = lower_line(days_from_start)
+            
+            # Fill between the confidence intervals
+            ax.fill_between(complete_df['duedate'], lower_values, upper_values,
+                          color='orange', alpha=0.1, label='Velocity Range (±20%)')
     
     # Plot scope line
     scope_line, = ax.plot(scope_df['date'], scope_df['total_estimate'], 
