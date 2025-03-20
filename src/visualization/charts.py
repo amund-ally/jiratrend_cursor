@@ -1,16 +1,9 @@
 from datetime import datetime, timedelta
 from typing import Dict, List, Tuple, Optional
 import pandas as pd
-import matplotlib.pyplot as plt
-import matplotlib.dates as mdates
 import numpy as np
-from matplotlib.widgets import Cursor
+import plotly.graph_objects as go
 from src.config.project_config import ProjectConfig
-
-# Constants
-START_DATE = datetime(2025, 3, 12)
-END_DATE = datetime(2025, 5, 6)
-HOURS_PER_DAY = 12.8
 
 def calculate_trend_line(valid_data: pd.DataFrame, project_config: ProjectConfig) -> Tuple[Optional[np.poly1d], Optional[datetime], Optional[Tuple[np.poly1d, np.poly1d]]]:
     """Calculate trend line based on total work completed over the period."""
@@ -42,20 +35,25 @@ def calculate_trend_line(valid_data: pd.DataFrame, project_config: ProjectConfig
     
     return trend_line, None, (upper_line, lower_line)
 
-def create_chart(df: pd.DataFrame, scope_df: pd.DataFrame, project_config: ProjectConfig) -> plt.Figure:
-    """Create and return the progress chart."""
+def create_chart(df: pd.DataFrame, scope_df: pd.DataFrame, project_config: ProjectConfig) -> go.Figure:
+    """Create and return the progress chart using Plotly."""
     df['duedate'] = pd.to_datetime(df['duedate'])
     df_with_dates = df.dropna(subset=['duedate'])
     
+    # Sort by date and calculate cumulative sum
     daily_estimates = df_with_dates.groupby('duedate')['originalestimate'].sum().reset_index()
     daily_estimates = daily_estimates.sort_values('duedate')
     daily_estimates['cumulative_sum'] = daily_estimates['originalestimate'].cumsum()
     
-    # Create complete dataset
+    # Create complete dataset with all dates
     date_range = pd.date_range(start=project_config.start_date, end=project_config.end_date, freq='D')
     complete_df = pd.DataFrame({'duedate': date_range})
+    
+    # Merge with daily estimates and forward fill
     complete_df = complete_df.merge(daily_estimates, on='duedate', how='left')
     complete_df['originalestimate'] = complete_df['originalestimate'].fillna(0)
+    
+    # Calculate cumulative sum for the complete dataset
     complete_df['cumulative_sum'] = complete_df['originalestimate'].cumsum()
     
     # Calculate completion metrics
@@ -71,82 +69,117 @@ def create_chart(df: pd.DataFrame, scope_df: pd.DataFrame, project_config: Proje
     valid_data = complete_df[complete_df['cumulative_sum'] > 0].copy()
     trend_line, intersect_date, confidence_intervals = calculate_trend_line(valid_data, project_config)
     
-    # Create the plot
-    fig, ax = plt.subplots(figsize=(12, 6))
+    # Create the Plotly figure
+    fig = go.Figure()
     
-    # Plot data
-    plot_data(ax, complete_df, scope_df, trend_line, valid_data, 
-              completion_date, today_scope, today, expected_progress, intersect_date,
-              confidence_intervals, project_config)
+    # Add completed work line
+    fig.add_trace(go.Scatter(
+        x=complete_df['duedate'].tolist(),
+        y=complete_df['cumulative_sum'].tolist(),
+        name='Completed',
+        mode='lines',
+        line=dict(color='blue', width=2, shape='linear'),
+        fill='tozeroy',
+        fillcolor='rgba(0,0,255,0.3)',
+        connectgaps=True,
+        hovertemplate='%{y:.1f} days<extra></extra>'
+    ))
     
-    plt.tight_layout()
-    return fig
-
-def plot_data(ax: plt.Axes, complete_df: pd.DataFrame, scope_df: pd.DataFrame,
-              trend_line: Optional[np.poly1d], valid_data: pd.DataFrame,
-              completion_date: datetime, today_scope: float,
-              today: datetime, expected_progress: float,
-              intersect_date: Optional[datetime],
-              confidence_intervals: Optional[Tuple[np.poly1d, np.poly1d]],
-              project_config: ProjectConfig) -> None:
-    """Plot all data on the chart."""
-    # Plot cumulative line
-    line, = ax.plot(complete_df['duedate'], complete_df['cumulative_sum'], 
-                    label='Completed', color='blue')
-    ax.fill_between(complete_df['duedate'], complete_df['cumulative_sum'], 
-                    alpha=0.3, color='blue')
+    # Add scope line
+    fig.add_trace(go.Scatter(
+        x=scope_df['date'].tolist(),
+        y=scope_df['total_estimate'].tolist(),
+        name=f'Total Scope ({today_scope:.1f} days)',
+        mode='lines',
+        line=dict(color='green', dash='dash', shape='linear'),
+        fill='tozeroy',
+        fillcolor='rgba(0,255,0,0.1)',
+        hovertemplate='%{y:.1f} days<extra></extra>'
+    ))
     
-    # Plot velocity trend line and confidence intervals
+    # Add velocity trend line and confidence intervals if available
     if trend_line is not None:
         # Calculate days from start for each date
         days_from_start = [(d - project_config.start_date).days for d in complete_df['duedate']]
         trend_values = trend_line(days_from_start)
         
-        # Plot the main trend line
-        ax.plot(complete_df['duedate'], trend_values, 
-                label='Current Velocity Projection', color='orange', linestyle='--', alpha=1.0)
+        # Add the main trend line
+        fig.add_trace(go.Scatter(
+            x=complete_df['duedate'].tolist(),
+            y=trend_values.tolist(),
+            name='Current Velocity Projection',
+            mode='lines',
+            line=dict(color='orange', dash='dash', width=2, shape='linear'),
+            hoverinfo='skip'
+        ))
         
-        # Plot confidence intervals if available
+        # Add confidence intervals if available
         if confidence_intervals is not None:
             upper_line, lower_line = confidence_intervals
             upper_values = upper_line(days_from_start)
             lower_values = lower_line(days_from_start)
             
-            # Fill between the confidence intervals
-            ax.fill_between(complete_df['duedate'], lower_values, upper_values,
-                          color='orange', alpha=0.1, label='Velocity Range (±20%)')
+            # Add the confidence interval area
+            fig.add_trace(go.Scatter(
+                x=complete_df['duedate'].tolist() + complete_df['duedate'].tolist()[::-1],
+                y=upper_values.tolist() + lower_values.tolist()[::-1],
+                name='Velocity Range (±20%)',
+                fill='toself',
+                fillcolor='rgba(255,165,0,0.1)',
+                line=dict(color='rgba(255,165,0,0)'),
+                hoverinfo='skip'
+            ))
     
-    # Plot scope line
-    scope_line, = ax.plot(scope_df['date'], scope_df['total_estimate'], 
-                         label=f'Total Scope ({scope_df["total_estimate"].max():.1f} days)', 
-                         color='green', linestyle='--')
-    ax.fill_between(scope_df['date'], scope_df['total_estimate'], 
-                    alpha=0.1, color='green')
+    # Add ideal completion line
+    fig.add_trace(go.Scatter(
+        x=[project_config.start_date, completion_date],
+        y=[0, today_scope],
+        name=f'Ideal Done ({completion_date.strftime("%Y-%m-%d")})',
+        line=dict(color='purple', dash='dash'),
+        mode='lines+markers',
+        marker=dict(
+            size=10, 
+            symbol='star',
+            showscale=False,
+            color=['rgba(0,0,0,0)', 'purple']  # First point transparent, second point purple
+        ),
+        hoverinfo='skip'
+    ))
     
-    # Plot intersection point if valid
-    if intersect_date:
-        ax.scatter(intersect_date, today_scope, color='red', s=100, 
-                   label=f'Intersection ({intersect_date.strftime("%Y-%m-%d")})')
-        ax.axvline(x=intersect_date, color='red', linestyle=':', alpha=0.5)
+    # Add today's expected progress point
+    fig.add_trace(go.Scatter(
+        x=[today],
+        y=[expected_progress],
+        name=f'Ideal Today ({expected_progress:.1f} days)',
+        mode='markers',
+        marker=dict(size=8, color='purple'),
+        hovertemplate='%{y:.1f} days<extra></extra>'
+    ))
     
-    # Plot completion point
-    ax.scatter(completion_date, today_scope, color='purple', s=150, 
-               marker='*', label=f'Ideal Done ({completion_date.strftime("%Y-%m-%d")})')
-    ax.plot([project_config.start_date, completion_date], [0, today_scope], 
-            color='purple', linestyle='--', alpha=0.5)
+    # Update layout
+    fig.update_layout(
+        title='Project Progress vs. Estimate',
+        xaxis_title='',
+        yaxis_title='',
+        hovermode='closest',
+        showlegend=True,
+        height=600,
+        legend=dict(
+            yanchor="top",
+            y=0.99,
+            xanchor="left",
+            x=1.05
+        )
+    )
     
-    # Plot today's expected progress
-    ax.scatter(today, expected_progress, color='purple', s=50, 
-               marker='o', label=f'Ideal Today ({expected_progress:.1f} days)')
+    # Update axes
+    fig.update_xaxes(
+        tickangle=-45,
+        gridcolor='rgba(128,128,128,0.3)',
+        range=[project_config.start_date, project_config.end_date]  # Set x-axis range
+    )
+    fig.update_yaxes(
+        gridcolor='rgba(128,128,128,0.3)'
+    )
     
-    # Customize plot
-    ax.set_title('Project Progress vs. Estimate')
-    ax.set_xlabel('')
-    ax.set_ylabel('')
-    ax.grid(True, alpha=0.3)
-    ax.legend(loc='center left', bbox_to_anchor=(1, 0.5), fancybox=True, shadow=True)
-    
-    max_y = max(complete_df['cumulative_sum'].max(), scope_df['total_estimate'].max(), 
-                expected_progress) + 2
-    ax.set_ylim(0, max_y)
-    plt.xticks(rotation=45) 
+    return fig 

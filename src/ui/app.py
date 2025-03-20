@@ -1,5 +1,4 @@
 import streamlit as st
-import matplotlib.pyplot as plt
 from datetime import datetime
 from src.config.jira_config import JiraConfig
 from src.config.project_config import ProjectConfig
@@ -10,7 +9,7 @@ def create_ui():
     """Create and run the Streamlit UI."""
     # Configure the page with optimized settings
     st.set_page_config(
-        page_title="JIRA Trend Analysis",
+        page_title="JIRA Burnup",
         layout="wide",
         initial_sidebar_state="expanded",
         menu_items={
@@ -30,15 +29,15 @@ def create_ui():
         </style>
     """, unsafe_allow_html=True)
     
-    st.title("JIRA Trend Analysis")
+    st.title("Charts")
     
     # Sidebar for configuration
     with st.sidebar:
         # Create tabs for different configurations
-        tab1, tab2 = st.tabs(["Project Settings", "JIRA Server"])
+        tab1, tab2 = st.tabs(["Chart Settings", "JIRA Server"])
         
         with tab1:
-            st.header("Project Configuration")
+            st.header("Chart Configuration")
             
             # Initialize session state for project input fields if not exists
             if 'project_name' not in st.session_state:
@@ -87,13 +86,14 @@ ORDER BY statusCategory ASC'''
             
             # Project configuration input fields
             project_name = st.text_input("Configuration Name", value=st.session_state.project_name)
+            st.subheader("Burnup Settings")
             hours_per_day = st.number_input("Hours per Day", min_value=0.0, max_value=24.0, 
                                           value=st.session_state.hours_per_day, step=0.1)
             start_date = st.date_input("Start Date", value=st.session_state.start_date)
             end_date = st.date_input("End Date", value=st.session_state.end_date)
-            jira_query = st.text_area("JIRA Query", value=st.session_state.jira_query, height=200)
+            jira_query = st.text_area("JQL Query", value=st.session_state.jira_query, height=200)
             
-            if st.button("Save Project Config"):
+            if st.button("Save Chart Config"):
                 if not project_name:
                     st.error("Please enter a configuration name")
                 else:
@@ -106,7 +106,7 @@ ORDER BY statusCategory ASC'''
                             jira_query=jira_query
                         )
                         config.save_to_config_file()
-                        st.success(f"Project configuration '{project_name}' saved!")
+                        st.success(f"Chart configuration '{project_name}' saved!")
                     except Exception as e:
                         st.error(f"Error saving configuration: {str(e)}")
         
@@ -151,7 +151,7 @@ ORDER BY statusCategory ASC'''
     try:
         # Check if configurations are loaded
         if not st.session_state.project_name:
-            st.info("👈 Please select or create a project configuration in the sidebar to view the chart.")
+            st.info("👈 Please select or create a chart configuration in the sidebar to view the chart.")
             return
             
         try:
@@ -163,7 +163,7 @@ ORDER BY statusCategory ASC'''
         try:
             project_config = ProjectConfig.from_config_file(st.session_state.project_name)
         except Exception as e:
-            st.error("⚠️ Project configuration not found. Please select or create a project configuration in the sidebar.")
+            st.error("⚠️ Chart configuration not found. Please select or create a chart configuration in the sidebar.")
             return
         
         # Fetch and process data
@@ -172,7 +172,7 @@ ORDER BY statusCategory ASC'''
         
         # Create and display the chart
         fig = create_chart(completed_df, scope_df, project_config)
-        st.pyplot(fig, use_container_width=True)
+        st.plotly_chart(fig, use_container_width=True)
         
         # Display summary statistics
         col1, col2, col3 = st.columns(3)
