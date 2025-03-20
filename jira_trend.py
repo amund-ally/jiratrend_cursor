@@ -174,13 +174,11 @@ def get_jira_data() -> Tuple[pd.DataFrame, pd.DataFrame]:
 def calculate_trend_line(valid_data: pd.DataFrame) -> Tuple[Optional[np.poly1d], Optional[datetime], Optional[Tuple[np.poly1d, np.poly1d]]]:
     """Calculate trend line based on total work completed over the period."""
     if len(valid_data) <= 1:
-        print("\nTrend calculation: Not enough data points")
         return None, END_DATE, None
     
     # Get only the days where work was completed
     completed_days = valid_data[valid_data['originalestimate'] > 0].copy()
     if len(completed_days) < 2:
-        print("Not enough days with completed work")
         return None, END_DATE, None
     
     # Calculate total work and days elapsed
@@ -192,13 +190,6 @@ def calculate_trend_line(valid_data: pd.DataFrame) -> Tuple[Optional[np.poly1d],
     # Calculate average velocity
     velocity = total_work / days_elapsed
     
-    print("\nVelocity calculation:")
-    print(f"Total work completed: {total_work:.1f} days")
-    print(f"Days elapsed: {days_elapsed}")
-    print(f"Average velocity: {velocity:.2f} days/day")
-    print(f"First completion: {first_day}")
-    print(f"Last completion: {last_day}")
-    
     # Create the main trend line
     trend_line = np.poly1d([velocity, 0])
     
@@ -207,10 +198,6 @@ def calculate_trend_line(valid_data: pd.DataFrame) -> Tuple[Optional[np.poly1d],
     variation = velocity * 0.2
     upper_line = np.poly1d([velocity + variation, 0])
     lower_line = np.poly1d([velocity - variation, 0])
-    
-    print(f"\nTrend line: y = {velocity:.4f}x")
-    print(f"Upper bound: y = {(velocity + variation):.4f}x")
-    print(f"Lower bound: y = {(velocity - variation):.4f}x")
     
     return trend_line, None, (upper_line, lower_line)
 
@@ -241,9 +228,6 @@ def create_chart(df: pd.DataFrame, scope_df: pd.DataFrame) -> None:
     
     # Calculate trend line
     valid_data = complete_df[complete_df['cumulative_sum'] > 0].copy()
-    print("\nData for trend line calculation:")
-    print(f"Total rows: {len(complete_df)}")
-    print(f"Rows with cumulative sum > 0: {len(valid_data)}")
     trend_line, intersect_date, confidence_intervals = calculate_trend_line(valid_data)
     
     # Create the plot
