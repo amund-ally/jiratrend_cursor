@@ -179,3 +179,4 @@ project_progress.png
 *.pyc
 tmp.txt
 /.vscode
+.DS_Store
