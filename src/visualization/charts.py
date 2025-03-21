@@ -5,7 +5,7 @@ import numpy as np
 import plotly.graph_objects as go
 from src.config.project_config import ProjectConfig
 
-def calculate_trend_line(valid_data: pd.DataFrame, project_config: ProjectConfig) -> Tuple[Optional[np.poly1d], Optional[datetime], Optional[Tuple[np.poly1d, np.poly1d]]]:
+def calculate_trend_line(valid_data: pd.DataFrame, project_config: ProjectConfig) -> Tuple[Optional[np.poly1d], Optional[float], Optional[Tuple[np.poly1d, np.poly1d]]]:
     """Calculate trend line based on total work completed over the period."""
     if len(valid_data) <= 1:
         return None, project_config.end_date, None
@@ -33,7 +33,7 @@ def calculate_trend_line(valid_data: pd.DataFrame, project_config: ProjectConfig
     upper_line = np.poly1d([velocity + variation, 0])
     lower_line = np.poly1d([velocity - variation, 0])
     
-    return trend_line, None, (upper_line, lower_line)
+    return trend_line, velocity, (upper_line, lower_line)
 
 def create_chart(df: pd.DataFrame, scope_df: pd.DataFrame, project_config: ProjectConfig) -> go.Figure:
     """Create and return the progress chart using Plotly."""
@@ -55,6 +55,7 @@ def create_chart(df: pd.DataFrame, scope_df: pd.DataFrame, project_config: Proje
     
     # Calculate cumulative sum for the complete dataset
     complete_df['cumulative_sum'] = complete_df['originalestimate'].cumsum()
+    completed_today = complete_df['cumulative_sum'].max()
     
     # Calculate completion metrics
     today_scope = scope_df['total_estimate'].max()
@@ -67,8 +68,9 @@ def create_chart(df: pd.DataFrame, scope_df: pd.DataFrame, project_config: Proje
     
     # Calculate trend line
     valid_data = complete_df[complete_df['cumulative_sum'] > 0].copy()
-    trend_line, intersect_date, confidence_intervals = calculate_trend_line(valid_data, project_config)
-    
+    trend_line, velocity, confidence_intervals = calculate_trend_line(valid_data, project_config)
+    ideal_velocity = project_config.hours_per_day / 8
+
     # Create the Plotly figure
     fig = go.Figure()
     
@@ -76,24 +78,22 @@ def create_chart(df: pd.DataFrame, scope_df: pd.DataFrame, project_config: Proje
     fig.add_trace(go.Scatter(
         x=complete_df['duedate'].tolist(),
         y=complete_df['cumulative_sum'].tolist(),
-        name='Completed',
+        name=f'Completed ({completed_today:.1f} days)',
         mode='lines',
         line=dict(color='blue', width=2, shape='linear'),
         fill='tozeroy',
         fillcolor='rgba(0,0,255,0.3)',
         connectgaps=True,
-        hovertemplate='%{y:.1f} days<extra></extra>'
+        hovertemplate='%{y:.1f} days<br>%{x}<extra></extra>'
     ))
-    
-    # Add scope line
+        
+    # Add today's expected progress point
     fig.add_trace(go.Scatter(
-        x=scope_df['date'].tolist(),
-        y=scope_df['total_estimate'].tolist(),
-        name=f'Total Scope ({today_scope:.1f} days)',
-        mode='lines',
-        line=dict(color='green', dash='dash', shape='linear'),
-        fill='tozeroy',
-        fillcolor='rgba(0,255,0,0.1)',
+        x=[today],
+        y=[expected_progress],
+        name=f'Ideal Today ({expected_progress:.1f} days)',
+        mode='markers',
+        marker=dict(size=8, color='purple'),
         hovertemplate='%{y:.1f} days<extra></extra>'
     ))
     
@@ -107,10 +107,12 @@ def create_chart(df: pd.DataFrame, scope_df: pd.DataFrame, project_config: Proje
         fig.add_trace(go.Scatter(
             x=complete_df['duedate'].tolist(),
             y=trend_values.tolist(),
-            name='Current Velocity Projection',
+            name=f'Velocity ({velocity:.1f}/{ideal_velocity:.1f} days)',
             mode='lines',
             line=dict(color='orange', dash='dash', width=2, shape='linear'),
-            hoverinfo='skip'
+            hoverinfo='skip',
+#            customdata=[velocity] * len(complete_df),
+#            hovertemplate='%{customdata:.1f} days<extra></extra>',
         ))
         
         # Add confidence intervals if available
@@ -145,15 +147,17 @@ def create_chart(df: pd.DataFrame, scope_df: pd.DataFrame, project_config: Proje
         ),
         hoverinfo='skip'
     ))
-    
-    # Add today's expected progress point
+
+    # Add scope line
     fig.add_trace(go.Scatter(
-        x=[today],
-        y=[expected_progress],
-        name=f'Ideal Today ({expected_progress:.1f} days)',
-        mode='markers',
-        marker=dict(size=8, color='purple'),
-        hovertemplate='%{y:.1f} days<extra></extra>'
+        x=scope_df['date'].tolist(),
+        y=scope_df['total_estimate'].tolist(),
+        name=f'Total Scope ({today_scope:.1f} days)',
+        mode='lines',
+        line=dict(color='green', dash='dash', shape='linear'),
+        fill='tozeroy',
+        fillcolor='rgba(0,255,0,0.1)',
+        hovertemplate='%{y:.1f} day<br>%{x}<extra></extra>'
     ))
     
     # Update layout

@@ -1,15 +1,16 @@
 import streamlit as st
-from datetime import datetime
+from datetime import datetime, timedelta
 from src.config.jira_config import JiraConfig
 from src.config.project_config import ProjectConfig
 from src.data.jira_client import get_jira_data
 from src.visualization.charts import create_chart
+from src.visualization.tables import create_completed_table
 
 def create_ui():
     """Create and run the Streamlit UI."""
     # Configure the page with optimized settings
     st.set_page_config(
-        page_title="JIRA Burnup",
+        page_title="JIRA Reports",
         layout="wide",
         initial_sidebar_state="expanded",
         menu_items={
@@ -45,24 +46,11 @@ def create_ui():
             if 'hours_per_day' not in st.session_state:
                 st.session_state.hours_per_day = 12.8
             if 'start_date' not in st.session_state:
-                st.session_state.start_date = datetime(2025, 3, 12)
+                st.session_state.start_date = (datetime.today() - timedelta(days=7))
             if 'end_date' not in st.session_state:
-                st.session_state.end_date = datetime(2025, 5, 6)
+                st.session_state.end_date = datetime.today()
             if 'jira_query' not in st.session_state:
-                st.session_state.jira_query = '''project = "DS" 
-and (status was in ("To Do", "In Progress", "In Review") after "2025-03-11"
-     OR status changed to "Done" after "2025-03-11")
-and status != "Rejected"
-and type not in ("Feature", "Portfolio Epic")
-and (
-    (issueKey in portfolioChildIssuesOf(DS-9557) 
-    OR issueKey in portfolioChildIssuesOf(DS-12475)
-    OR issueKey in (DS-9557, DS-12475))
-    OR 
-    (parent in (DS-9557, DS-12475))
-)
-and parent not in (DS-12484, DS-9866, DS-12111, DS-9009)   
-ORDER BY statusCategory ASC'''
+                st.session_state.jira_query = ""
             
             # Load existing configurations
             available_configs = ProjectConfig.list_available_configs()
@@ -173,7 +161,11 @@ ORDER BY statusCategory ASC'''
         # Create and display the chart
         fig = create_chart(completed_df, scope_df, project_config)
         st.plotly_chart(fig, use_container_width=True)
-        
+
+        # Create and display a table of completed issues
+        fig = create_completed_table(completed_df, jira_config)
+        st.plotly_chart(fig, use_container_width=True)
+
         # Display summary statistics
         col1, col2, col3 = st.columns(3)
         
@@ -201,7 +193,7 @@ ORDER BY statusCategory ASC'''
                 f"{remaining_work:.1f} days",
                 help="Remaining work in days"
             )
-        
+
     except Exception as e:
         st.error(f"Error: {str(e)}")
         st.info("Please check your configurations in the sidebar.") 
