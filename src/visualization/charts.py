@@ -3,17 +3,17 @@ from typing import Dict, List, Tuple, Optional
 import pandas as pd
 import numpy as np
 import plotly.graph_objects as go
-from src.config.project_config import ProjectConfig
+from src.config.chart_config import ChartConfig
 
-def calculate_trend_line(valid_data: pd.DataFrame, project_config: ProjectConfig) -> Tuple[Optional[np.poly1d], Optional[float], Optional[Tuple[np.poly1d, np.poly1d]]]:
+def calculate_trend_line(valid_data: pd.DataFrame, chart_config: ChartConfig) -> Tuple[Optional[np.poly1d], Optional[float], Optional[Tuple[np.poly1d, np.poly1d]]]:
     """Calculate trend line based on total work completed over the period."""
     if len(valid_data) <= 1:
-        return None, project_config.end_date, None
+        return None, chart_config.end_date, None
     
     # Get only the days where work was completed
     completed_days = valid_data[valid_data['originalestimate'] > 0].copy()
     if len(completed_days) < 2:
-        return None, project_config.end_date, None
+        return None, chart_config.end_date, None
     
     # Calculate total work and days elapsed
     total_work = completed_days['originalestimate'].sum()
@@ -35,7 +35,7 @@ def calculate_trend_line(valid_data: pd.DataFrame, project_config: ProjectConfig
     
     return trend_line, velocity, (upper_line, lower_line)
 
-def create_chart(df: pd.DataFrame, scope_df: pd.DataFrame, project_config: ProjectConfig) -> go.Figure:
+def create_chart(df: pd.DataFrame, scope_df: pd.DataFrame, chart_config: ChartConfig) -> go.Figure:
     """Create and return the progress chart using Plotly."""
     df['duedate'] = pd.to_datetime(df['duedate'])
     df_with_dates = df.dropna(subset=['duedate'])
@@ -46,7 +46,7 @@ def create_chart(df: pd.DataFrame, scope_df: pd.DataFrame, project_config: Proje
     daily_estimates['cumulative_sum'] = daily_estimates['originalestimate'].cumsum()
     
     # Create complete dataset with all dates
-    date_range = pd.date_range(start=project_config.start_date, end=project_config.end_date, freq='D')
+    date_range = pd.date_range(start=chart_config.start_date, end=chart_config.end_date, freq='D')
     complete_df = pd.DataFrame({'duedate': date_range})
     
     # Merge with daily estimates and forward fill
@@ -59,17 +59,17 @@ def create_chart(df: pd.DataFrame, scope_df: pd.DataFrame, project_config: Proje
     
     # Calculate completion metrics
     today_scope = scope_df['total_estimate'].max()
-    days_needed = (today_scope * 8) / project_config.hours_per_day
-    completion_date = project_config.start_date + timedelta(days=days_needed)
+    days_needed = (today_scope * 8) / chart_config.hours_per_day
+    completion_date = chart_config.start_date + timedelta(days=days_needed)
     
     today = datetime.now()
-    work_days = (today - project_config.start_date).total_seconds() / (3600 * 24)
-    expected_progress = (work_days * project_config.hours_per_day) / 8
+    work_days = (today - chart_config.start_date).total_seconds() / (3600 * 24)
+    expected_progress = (work_days * chart_config.hours_per_day) / 8
     
     # Calculate trend line
     valid_data = complete_df[complete_df['cumulative_sum'] > 0].copy()
-    trend_line, velocity, confidence_intervals = calculate_trend_line(valid_data, project_config)
-    ideal_velocity = project_config.hours_per_day / 8
+    trend_line, velocity, confidence_intervals = calculate_trend_line(valid_data, chart_config)
+    ideal_velocity = chart_config.hours_per_day / 8
 
     # Create the Plotly figure
     fig = go.Figure()
@@ -100,7 +100,7 @@ def create_chart(df: pd.DataFrame, scope_df: pd.DataFrame, project_config: Proje
     # Add velocity trend line and confidence intervals if available
     if trend_line is not None:
         # Calculate days from start for each date
-        days_from_start = [(d - project_config.start_date).days for d in complete_df['duedate']]
+        days_from_start = [(d - chart_config.start_date).days for d in complete_df['duedate']]
         trend_values = trend_line(days_from_start)
         
         # Add the main trend line
@@ -134,7 +134,7 @@ def create_chart(df: pd.DataFrame, scope_df: pd.DataFrame, project_config: Proje
     
     # Add ideal completion line
     fig.add_trace(go.Scatter(
-        x=[project_config.start_date, completion_date],
+        x=[chart_config.start_date, completion_date],
         y=[0, today_scope],
         name=f'Ideal Done ({completion_date.strftime("%Y-%m-%d")})',
         line=dict(color='purple', dash='dash'),
@@ -167,7 +167,7 @@ def create_chart(df: pd.DataFrame, scope_df: pd.DataFrame, project_config: Proje
         yaxis_title='',
         hovermode='closest',
         showlegend=True,
-        height=600,
+        height=500,
         legend=dict(
             yanchor="top",
             y=0.99,
@@ -180,10 +180,15 @@ def create_chart(df: pd.DataFrame, scope_df: pd.DataFrame, project_config: Proje
     fig.update_xaxes(
         tickangle=-45,
         gridcolor='rgba(128,128,128,0.3)',
-        range=[project_config.start_date, project_config.end_date]  # Set x-axis range
+        range=[chart_config.start_date, chart_config.end_date],
     )
+
     fig.update_yaxes(
-        gridcolor='rgba(128,128,128,0.3)'
+        gridcolor='rgba(128,128,128,0.3)',
+        range=[0, max(today_scope, completed_today) * 1.08],  # Add 8% padding to the top
+        showgrid=True,
+        dtick=5,
+        tick0=0,
     )
     
     return fig 
