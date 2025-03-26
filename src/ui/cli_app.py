@@ -3,12 +3,14 @@ import argparse
 import sys
 from pathlib import Path
 import plotly.io as pio
+import plotly.graph_objects as go
+from plotly.subplots import make_subplots
 
 from src.config.jira_config import JiraConfig
 from src.config.chart_config import ChartConfig
 from src.data.jira_client import get_jira_data
-from src.visualization.charts import create_chart
-
+from src.visualization.charts import create_progress_chart
+from src.visualization.tables import create_tables
 
 def parse_args():
     """Parse command line arguments."""
@@ -61,8 +63,23 @@ def main():
         
         # Create chart
         print("Generating chart...")
-        fig = create_chart(completed_df, scope_df, chart_config)
-        
+        chart_fig = create_progress_chart(completed_df, scope_df, chart_config)
+
+        # Create tables
+        print("Generating tables...")
+        tables = create_tables(completed_df)
+
+        fig = make_subplots(rows=3, cols=1)
+
+        fig.add_trace(chart_fig.data, row=1, col=1)
+        fig.add_trace(tables.completed.data, row=2, col=1)
+        fig.add_trace(tables.stats.data, row=3, col=1)
+
+        fig.update_layout(height=600, width=800, title_text="Multiple Subplots")
+        fig.show()
+        #st.plotly_chart(tables.completed, use_container_width=True)
+        #st.plotly_chart(tables.stats, use_container_width=True)
+
         # Output handling
         if args.output:
             # Save to file in requested format

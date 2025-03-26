@@ -6,7 +6,7 @@ from datetime import datetime, timedelta
 from src.config.jira_config import JiraConfig
 from src.config.chart_config import ChartConfig
 from src.data.jira_client import get_jira_data
-from src.visualization.charts import create_chart, get_empty_figure
+from src.visualization.charts import create_progress_chart, get_empty_figure
 from src.visualization.tables_dash import create_tables
 
 dbc_css = "https://cdn.jsdelivr.net/gh/AnnMarieW/dash-bootstrap-templates/dbc.min.css"
@@ -177,7 +177,7 @@ def update_charts(selected_config):
         
         # Get data and create visualizations
         completed_df, scope_df = get_jira_data(jira_config, chart_config)
-        chart_fig = create_chart(completed_df, scope_df, chart_config)
+        chart_fig = create_progress_chart(completed_df, scope_df, chart_config)
         completed_table, stats_table = create_tables(completed_df, jira_config.browse_url)
 
         # Calculate summary statistics

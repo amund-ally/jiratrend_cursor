@@ -54,7 +54,7 @@ def get_empty_figure() -> go.Figure:
     
     return fig_none
 
-def create_chart(df: pd.DataFrame, scope_df: pd.DataFrame, chart_config: ChartConfig) -> go.Figure:
+def create_progress_chart(df: pd.DataFrame, scope_df: pd.DataFrame, chart_config: ChartConfig) -> go.Figure:
     """Create and return the progress chart using Plotly."""
     df['duedate'] = pd.to_datetime(df['duedate'])
     df_with_dates = df.dropna(subset=['duedate'])

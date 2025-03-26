@@ -4,7 +4,7 @@ from datetime import datetime, timedelta
 from src.config.jira_config import JiraConfig
 from src.config.chart_config import ChartConfig
 from src.data.jira_client import get_jira_data
-from src.visualization.charts import create_chart
+from src.visualization.charts import create_progress_chart
 from src.visualization.tables import create_tables
 
 def get_metrics_explanation():
@@ -47,7 +47,7 @@ def create_ui():
     """Create and run the Streamlit UI."""
     # Configure the page with optimized settings
     st.set_page_config(
-        page_title="JIRA Reports",
+        page_title="Reports",
         layout="wide",
         initial_sidebar_state="expanded",
         menu_items={
@@ -198,7 +198,7 @@ def create_ui():
             completed_df, scope_df = get_jira_data(jira_config, chart_config)
         
         # Create and display the chart
-        fig = create_chart(completed_df, scope_df, chart_config)
+        fig = create_progress_chart(completed_df, scope_df, chart_config)
         st.plotly_chart(fig, use_container_width=True)
 
         # Display summary statistics
@@ -230,9 +230,9 @@ def create_ui():
             )
 
         # Create and display tables
-        charts = create_tables(completed_df)
-        st.plotly_chart(charts.completed, use_container_width=True)
-        st.plotly_chart(charts.stats, use_container_width=True)
+        tables = create_tables(completed_df)
+        st.plotly_chart(tables.completed, use_container_width=True)
+        st.plotly_chart(tables.stats, use_container_width=True)
         
         # Add collapsible metrics explanation
         with st.expander("📊 Understanding the Metrics", expanded=False):
