@@ -12,6 +12,19 @@
             "console": "integratedTerminal"
         },
         {
+         "name": "CLI Charts",
+         "type": "debugpy",
+         "request": "launch",
+         "program": "${file}",
+         "console": "integratedTerminal",
+         "args": ["--chart-config=CAWO Migration"],
+         "cwd": "${workspaceFolder}",
+         "env": {
+            "PYTHONPATH": "${workspaceFolder}"
+         }
+      },
+        
+        {
             "name": "Streamlit App",
             "type": "debugpy",
             "request": "launch",
@@ -39,6 +52,19 @@
             "env": {
                "PYTHONPATH": "${workspaceFolder}",
                "DASH_DEBUG": "true"
+            }
+         },
+         {
+            "name": "Dash App",
+            "type": "debugpy",
+            "request": "launch",
+            "program": "${workspaceFolder}/src/main_dash.py",
+            "justMyCode": true,
+            "console": "integratedTerminal",
+            "cwd": "${workspaceFolder}",
+            "env": {
+               "PYTHONPATH": "${workspaceFolder}",
+               "DASH_DEBUG": "false"
             }
          }
     ]

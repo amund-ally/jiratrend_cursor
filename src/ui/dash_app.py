@@ -1,14 +1,17 @@
 from dash import Dash, html, dcc, dash_table, Input, Output, State
 import dash_bootstrap_components as dbc
+import dash_bootstrap_templates as dbt
 from dash.exceptions import PreventUpdate
 from datetime import datetime, timedelta
 from src.config.jira_config import JiraConfig
 from src.config.chart_config import ChartConfig
 from src.data.jira_client import get_jira_data
-from src.visualization.charts import create_chart
+from src.visualization.charts import create_chart, get_empty_figure
 from src.visualization.tables_dash import create_tables
 
-app = Dash(__name__, external_stylesheets=[dbc.themes.MINTY])
+dbc_css = "https://cdn.jsdelivr.net/gh/AnnMarieW/dash-bootstrap-templates/dbc.min.css"
+app = Dash(__name__, external_stylesheets=[dbc.themes.SLATE, dbc_css])
+#dbt.load_figure_template("solar")
 
 # Add custom CSS
 app.index_string = '''
@@ -18,52 +21,6 @@ app.index_string = '''
         {%metas%}
         {%favicon%}
         {%css%}
-        <style>
-            body {
-                background-color: #f8f9fa;
-                font-family: -apple-system, BlinkMacSystemFont, sans-serif;
-            }
-            .dash-table-container .dash-spreadsheet-container .dash-spreadsheet-inner td, 
-            .dash-table-container .dash-spreadsheet-container .dash-spreadsheet-inner th {
-                padding: 10px;
-                font-family: -apple-system, BlinkMacSystemFont, sans-serif;
-            }
-            .card {
-                box-shadow: 0 2px 4px rgba(0,0,0,0.1);
-                border-radius: 8px;
-                margin-bottom: 1rem;
-            }
-            .card-header {
-                background-color: #f1f3f5;
-                border-bottom: 1px solid #dee2e6;
-                padding: 1rem;
-            }
-            .form-control {
-                margin-bottom: 1rem;
-            }
-            h1 {
-                color: #2c3e50;
-                margin-bottom: 2rem;
-                padding: 1rem 0;
-            }
-
-            /* Customize loading spinner */
-            ._dash-loading-callback {
-                font-family: -apple-system, BlinkMacSystemFont, sans-serif;
-                position: absolute;
-                top: 50%;
-                left: 50%;
-                transform: translate(-50%, -50%);
-                z-index: 1000;
-            }
-            
-            ._dash-loading-callback::after {
-                content: 'Loading...';
-                margin-left: 10px;
-                font-size: 14px;
-                color: #2c3e50;
-            }
-        </style>
     </head>
     <body>
         {%app_entry%}
@@ -83,99 +40,93 @@ app.layout = dbc.Container([
         # Left sidebar
         dbc.Col([
             dbc.Card([
-                dbc.CardHeader(html.H4("Chart Configuration", className="mb-0")),
+                dbc.CardHeader("Chart Configuration"),
                 dbc.CardBody([
                     # Configuration selector
-                    dcc.Dropdown(
+                    dbc.Select(
                         id='config-selector',
-                        options=[{'label': 'Select configuration...', 'value': ''}] + 
+                        options=[{'label': 'Select configuration...', 'value': '', 'disabled': True}] + 
                                 [{'label': c, 'value': c} for c in ChartConfig.list_available_configs()],
-                        value='',
-                        className='mb-3'
                     ),
                     
+                    dbc.Row([html.Div(html.Hr(style={'borderWidth': "0.3vh", "width": "100%"}))]),
+                    
                     # Configuration form
-                    dbc.Form([
-                        dbc.Input(id='config-name', placeholder="Configuration Name", type='text'),
+                    #dbc.Form([
+                        dbc.Input(id='config-name', placeholder="Configuration Name", type='text', className="mb-2"),
                         dbc.Input(id='hours-per-day', placeholder="Hours per Day", 
-                                type='number', value=12.8, min=0, max=24, step=0.1),
+                                type='number', value=12.8, min=0, max=24, step=0.1, className="mb-2"),
                         dcc.DatePickerRange(
                             id='date-range',
                             start_date=datetime.today() - timedelta(days=7),
-                            end_date=datetime.today()
+                            end_date=datetime.today(), 
+                            className="mb-2"
                         ),
-                        dbc.Textarea(id='jql-query', placeholder="JQL Query", rows=5),
+                        dbc.Textarea(id='jql-query', placeholder="JQL Query", rows=5, className="mb-2"),
                         dbc.Button("Save Configuration", id='save-config', color="primary")
-                    ])
-                ], className="p-4")
-            ], className="mb-4 shadow-sm"),
+                    #])
+                ],)
+            ], className="mb-3 mt-3"),
             
             # JIRA Configuration
             dbc.Card([
-                dbc.CardHeader(html.H4("JIRA Configuration", className="mb-0")),
+                dbc.CardHeader("JIRA Configuration"),
                 dbc.CardBody([
-                    dbc.Input(id='server-url', placeholder="JIRA Server URL", type='text'),
-                    dbc.Input(id='username', placeholder="Username", type='text'),
-                    dbc.Input(id='api-key', placeholder="API Key", type='password'),
+                    dbc.Input(id='server-url', placeholder="JIRA Server URL", type='text', className="mb-2"),
+                    dbc.Input(id='username', placeholder="Username", type='text', className="mb-2"),
+                    dbc.Input(id='api-key', placeholder="API Key", type='password', className="mb-2"),
                     dbc.Row([
                         dbc.Col(dbc.Button("Load Config", id='load-jira-config')),
                         dbc.Col(dbc.Button("Save Config", id='save-jira-config'))
                     ])
-                ], className="p-4")
-            ], className="shadow-sm")
-        ], width=3, className="pe-4"),
+                ], )
+            ], className="mb-3")
+        ], width=3,),
         
         # Main content
         dbc.Col([
             dcc.Loading(
                 id="loading-main",
-                type="circle",
-                children=[            
+                type="default",
+                children=[
                     # Burnup Chart
                     dbc.Card([
                         dbc.CardBody([
-                            dcc.Graph(id='burnup-chart')
+                            dcc.Graph(id='burnup-chart', figure=get_empty_figure()),
                         ])
-                    ], className="mb-4 shadow-sm"),
+                    ], className="mb-3 mt-3"),
                     
                     # Metrics Cards
                     dbc.Row([
-                        dbc.Col(dbc.Card(id='total-scope', className="text-center shadow-sm")),
-                        dbc.Col(dbc.Card(id='completed-work', className="text-center shadow-sm")),
-                        dbc.Col(dbc.Card(id='remaining-work', className="text-center shadow-sm"))
-                    ], className="mb-4"),
+                        dbc.Col(dbc.Card(id='total-scope')),
+                        dbc.Col(dbc.Card(id='completed-work')),
+                        dbc.Col(dbc.Card(id='remaining-work'))
+                    ], className="mb-3"),
                     
                     # Tables
                     dbc.Card([
-                        dbc.CardHeader(html.H4("Completed Issues", className="mb-0")),
+                        dbc.CardHeader("Completed Issues"),
                         dbc.CardBody([
                             dash_table.DataTable(
                                 id='completed-table',
-                            columns=[
-                                {'name': 'Issue', 'id': 'Issue'},
-                                {'name': 'Due Date', 'id': 'Due Date'},
-                                {'name': 'Est Time(d)', 'id': 'Est Time', 'type': 'numeric', 'format': {'specifier': '.2f'}},
-                                {'name': 'Actual Time(d)', 'id': 'Actual Time', 'type': 'numeric', 'format': {'specifier': '.2f'}}
-                            ],
-                            style_table={'overflowX': 'auto'},
-                                style_cell={
-                                    'textAlign': 'left',
-                                    'padding': '10px',
-                                    'font-family': '-apple-system, BlinkMacSystemFont, sans-serif'
-                                },
-                                style_header={
-                                    'backgroundColor': '#f1f3f5',
-                                    'fontWeight': 'bold'
-                                },
-                                style_data={'backgroundColor': 'white'},
-                                page_size=10
+                                columns=[
+                                    {'name': 'Issue', 'id': 'Issue', 'type': 'text', 'presentation': 'markdown'},
+                                    {'name': 'Due Date', 'id': 'Due Date'},
+                                    {'name': 'Est Time(d)', 'id': 'Est Time', 'type': 'numeric', 'format': {'specifier': '.2f'}},
+                                    {'name': 'Actual Time(d)', 'id': 'Actual Time', 'type': 'numeric', 'format': {'specifier': '.2f'}}
+                                ],
+                                data=[],
+                                markdown_options={'link_target': '_blank'},
+                                style_table={'overflowX': 'auto'},
+                                page_size=10,
+                                sort_action='native',
                             )
-                        ], className="p-0")
-                    ], className="mb-4 shadow-sm"),
+                        ], className="dbc"),
+                    ], className="mb-3"),
                     
                     # Stats Table
                     dbc.Card([
-                        dbc.CardHeader(html.H4("Statistics", className="mb-0")),
+                        dbc.CardHeader("Statistics"),
                         dbc.CardBody([
                             dash_table.DataTable(
                                 id='stats-table',
@@ -186,28 +137,19 @@ app.layout = dbc.Container([
                                     {'name': 'Interpretation', 'id': 'Interpretation'}
                                 ],
                                 style_table={'overflowX': 'auto'},
-                                style_cell={
-                                    'textAlign': 'left',
-                                    'padding': '10px',
-                                    'font-family': '-apple-system, BlinkMacSystemFont, sans-serif'
-                                },
-                                style_header={
-                                    'backgroundColor': '#f1f3f5',
-                                    'fontWeight': 'bold'
-                                },
-                                style_data={'backgroundColor': 'white'}
                             )
-                        ], className="p-0")
-                    ], className="mb-4 shadow-sm")
-                ]
+                        ], className="dbc"),
+                    ])
+                ],
             )
         ], width=9)
-    ], className="g-4")
-], fluid=True, className="px-4 py-4")
+    ])
+], fluid=True)
 
 # Callbacks
 @app.callback(
-    [Output('burnup-chart', 'figure'),
+    [# dashboard data
+     Output('burnup-chart', 'figure'),
      Output('completed-table', 'data'),
      Output('stats-table', 'data'),
      Output('total-scope', 'children'),
@@ -236,7 +178,7 @@ def update_charts(selected_config):
         # Get data and create visualizations
         completed_df, scope_df = get_jira_data(jira_config, chart_config)
         chart_fig = create_chart(completed_df, scope_df, chart_config)
-        completed_table, stats_table = create_tables(completed_df)
+        completed_table, stats_table = create_tables(completed_df, jira_config.browse_url)
 
         # Calculate summary statistics
         total_scope = scope_df['total_estimate'].max()
@@ -305,9 +247,10 @@ def save_configuration(n_clicks, name, hours_per_day, start_date, end_date, jql_
         
     except Exception as e:
         raise PreventUpdate
-    
+
+
 def create_metric_card(title, value):
-    return dbc.CardBody([
-        html.H4(title, className="card-title"),
-        html.H2(value)
-    ])
+    return [
+        dbc.CardHeader(title),
+        dbc.CardBody([value])
+    ]

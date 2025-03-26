@@ -9,7 +9,17 @@ class JiraConfig:
     username: str
     api_key: str
     server_url: str
+    
+    def __init__(self, server_url: str, username: str, api_key: str):
+        self.server_url = server_url.rstrip('/')  # Remove trailing slash if present
+        self.username = username
+        self.api_key = api_key
 
+    @property
+    def browse_url(self) -> str:
+        """Get the base URL for browsing issues."""
+        return f"{self.server_url}/browse"
+    
     @classmethod
     def from_config_file(cls, config_file: str = 'config/jira.config') -> 'JiraConfig':
         """Create JiraConfig instance from config file."""

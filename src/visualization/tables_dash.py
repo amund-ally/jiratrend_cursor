@@ -1,13 +1,13 @@
-#from collections import namedtuple
 import pandas as pd
 import plotly.graph_objects as go
 
-#Table_Figures = namedtuple('Tables', ['completed', 'stats'])
-
-def create_tables(completed_df: pd.DataFrame):
+def create_tables(completed_df: pd.DataFrame, browse_url: str):
     # Filter for completed issues with both estimate and actual time
     filtered_df = completed_df[completed_df['duedate'].notna()][['key', 'duedate', 'originalestimate', 'timespentworking']].copy()
     filtered_df.columns = ['Issue', 'Due Date', 'Est Time', 'Actual Time']
+
+    # Add browse URL markdown to filtered_df
+    filtered_df['Issue'] = filtered_df['Issue'].apply(lambda x: f'[{x[3:]}]({browse_url}/{x})')
 
     metrics = calculate_estimate_accuracy_metrics(filtered_df)
     

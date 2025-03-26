@@ -19,11 +19,14 @@ def calculate_trend_line(valid_data: pd.DataFrame, chart_config: ChartConfig) ->
     total_work = completed_days['originalestimate'].sum()
     first_day = completed_days['duedate'].min()
     last_day = completed_days['duedate'].max()
-    days_elapsed = (last_day - first_day).days + 1  # +1 to include both start and end days
-    
+    #days_elapsed = (last_day - first_day).days + 1  # +1 to include both start and end days
+    days_elapsed_since_start = (datetime.now() - first_day).days + 1  # +1 to include today    
+
     # Calculate average velocity
-    velocity = total_work / days_elapsed
-    
+    # Changed this from days_elapsed, which calculates days in the completed
+    #   range. velocity needs to be up to today.
+    velocity = total_work / days_elapsed_since_start
+
     # Create the main trend line
     trend_line = np.poly1d([velocity, 0])
     
@@ -34,6 +37,22 @@ def calculate_trend_line(valid_data: pd.DataFrame, chart_config: ChartConfig) ->
     lower_line = np.poly1d([velocity - variation, 0])
     
     return trend_line, velocity, (upper_line, lower_line)
+
+def get_empty_figure() -> go.Figure:
+    """Return an empty figure with a message."""
+    background = 'rgba(255, 255, 255, 0.0)'
+    fig_none = go.Figure()
+    fig_none.update_layout(
+        paper_bgcolor=background,
+        plot_bgcolor=background      
+    )
+    fig_none.update_layout(
+        showlegend=False,
+        xaxis = dict(visible=False),
+        yaxis = dict(visible=False),
+    )
+    
+    return fig_none
 
 def create_chart(df: pd.DataFrame, scope_df: pd.DataFrame, chart_config: ChartConfig) -> go.Figure:
     """Create and return the progress chart using Plotly."""
@@ -168,12 +187,14 @@ def create_chart(df: pd.DataFrame, scope_df: pd.DataFrame, chart_config: ChartCo
         hovermode='closest',
         showlegend=True,
         height=500,
+        plot_bgcolor='white',
+        paper_bgcolor='white',
         legend=dict(
             yanchor="top",
             y=0.99,
             xanchor="left",
             x=1.05
-        )
+        ),
     )
     
     # Update axes
