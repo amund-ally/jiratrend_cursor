@@ -18,41 +18,58 @@ def process_estimate_changes(issues: dict, chart_config: ChartConfig) -> Tuple[D
     """Process estimate changes from issue changelogs."""
     estimate_changes: Dict = {}
     current_estimates: Dict = {}
-    initial_estimates: Dict = {}
+    
+    # Initialize the estimate changes dict with an empty dict for start date
+    start_date = chart_config.start_date.date()
+    if start_date not in estimate_changes:
+        estimate_changes[start_date] = {}
     
     for issue in issues:
-        # Get the initial estimate from the issue's current state
+        # Get the current estimate from the issue's current state
         current_estimate = issue.fields.timeoriginalestimate / (3600 * 8) if issue.fields.timeoriginalestimate else 0
-        
-        # Initialize the estimate changes with the current estimate
-        if chart_config.start_date.date() not in estimate_changes:
-            estimate_changes[chart_config.start_date.date()] = {}
-        estimate_changes[chart_config.start_date.date()][issue.key] = current_estimate
         current_estimates[issue.key] = current_estimate
         
-        # Process changelog to find the estimate as of start date
-        initial_estimate = 0  # Start with 0 by default
+        # Check if the issue existed before the start date (created date)
+        issue_created = pd.to_datetime(issue.fields.created).date()
         
-        # First, find the most recent estimate before start date
-        pre_start_estimates = []
-        for history in issue.changelog.histories:
-            history_datetime = pd.to_datetime(history.created)
-            if history_datetime.date() <= chart_config.start_date.date():
-                for item in history.items:
-                    if item.field == 'timeoriginalestimate':
-                        estimate = float(item.toString) / (3600 * 8) if item.toString else 0
-                        pre_start_estimates.append((history_datetime, estimate))
+        # First, find if this issue had an estimate before the start date
+        estimate_on_start_date = 0  # Default to zero - only include if there's evidence it existed with an estimate
+        existed_before_start = issue_created <= start_date
         
-        # Sort by datetime and get the most recent estimate before start date
-        if pre_start_estimates:
-            pre_start_estimates.sort(key=lambda x: x[0], reverse=True)
-            initial_estimate = pre_start_estimates[0][1]
+        if existed_before_start:
+            # Check for estimate history before start date
+            pre_start_estimates = []
+            for history in issue.changelog.histories:
+                history_datetime = pd.to_datetime(history.created)
+                if history_datetime.date() <= start_date:
+                    for item in history.items:
+                        if item.field == 'timeoriginalestimate':
+                            estimate = float(item.toString) / (3600 * 8) if item.toString else 0
+                            pre_start_estimates.append((history_datetime, estimate))
+            
+            # Sort by datetime and get the most recent estimate before start date
+            if pre_start_estimates:
+                pre_start_estimates.sort(key=lambda x: x[0], reverse=True)
+                estimate_on_start_date = pre_start_estimates[0][1]
+            elif existed_before_start:
+                # If the issue existed before start date but has no estimate history,
+                # check if it was created with an estimate
+                if issue.fields.timeoriginalestimate and issue_created <= start_date:
+                    # Assume the current estimate was set on creation if there's no history
+                    estimate_on_start_date = current_estimate
         
-        # Then process changes after start date
+        # Add this issue's initial estimate to the start date ONLY if it had a value then
+        if estimate_on_start_date > 0:
+            estimate_changes[start_date][issue.key] = estimate_on_start_date
+        
+        # Process changes after start date
         post_start_changes = []
+        
+        # Do NOT add creation as a change event - only actual estimate changes
+        # from the changelog should be considered
         for history in issue.changelog.histories:
             history_datetime = pd.to_datetime(history.created)
-            if history_datetime.date() > chart_config.start_date.date():
+            if history_datetime.date() > start_date:
                 for item in history.items:
                     if item.field == 'timeoriginalestimate':
                         new_estimate = float(item.toString) / (3600 * 8) if item.toString else 0
@@ -65,12 +82,6 @@ def process_estimate_changes(issues: dict, chart_config: ChartConfig) -> Tuple[D
             if change_date not in estimate_changes:
                 estimate_changes[change_date] = {}
             estimate_changes[change_date][issue.key] = new_estimate
-            current_estimates[issue.key] = new_estimate
-        
-        initial_estimates[issue.key] = initial_estimate
-    
-    # Set the initial estimates for start date
-    estimate_changes[chart_config.start_date.date()] = initial_estimates
     
     return estimate_changes, current_estimates
 
@@ -86,10 +97,12 @@ def create_scope_dataframe(estimate_changes: Dict, chart_config: ChartConfig) ->
     
     for date in sorted_dates:
         # Update running estimates with any changes for this date
-        for issue_key, new_estimate in estimate_changes[date].items():
-            running_estimates[issue_key] = new_estimate
+        if date != sorted_dates[0]:  # Skip first date as we've already initialized with it
+            for issue_key, new_estimate in estimate_changes[date].items():
+                running_estimates[issue_key] = new_estimate
         
         total = sum(running_estimates.values())
+        
         scope_data.append({
             'date': date,
             'total_estimate': total

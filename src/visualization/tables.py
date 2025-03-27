@@ -120,20 +120,22 @@ def create_completed_table(filtered_df: pd.DataFrame) -> go.Figure:
     padding = 50 # extra space for title and margins
     table_height = (len(filtered_df) + 1) * row_height + padding
 
+    sorted_df = filtered_df.sort_values(by='Due Date', ascending=False)
+
     # Create the completed issues table
     completed_issues_fig = go.Figure(data=[go.Table(
         header=dict(
-            values=['Issue', 'Due Date', 'Est Time(d)', 'Actual Time(d)'],
+            values=['Issue', 'Date Completed', 'Est Time(d)', 'Actual Time(d)'],
             fill_color='rgba(200,200,200,0.3)',
             font=dict(color='black', size=14),
             align='left'
         ),
         cells=dict(
             values=[
-                filtered_df['Issue'],
-                filtered_df['Due Date'].astype(str),
-                filtered_df['Est Time'].apply(lambda x: f'{x:.2f}'),
-                filtered_df['Actual Time'].apply(lambda x: f'{x:.2f}'),
+                sorted_df['Issue'],
+                sorted_df['Due Date'].astype(str),
+                sorted_df['Est Time'].apply(lambda x: f'{x:.2f}'),
+                sorted_df['Actual Time'].apply(lambda x: f'{x:.2f}'),
             ],
             fill_color='rgba(200,200,200,0.1)',
             font=dict(color='black', size=12),
