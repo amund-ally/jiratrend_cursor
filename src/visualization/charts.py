@@ -102,28 +102,8 @@ def create_progress_chart(df: pd.DataFrame, scope_df: pd.DataFrame, chart_config
     completion_date = np.busday_offset(today, business_days_remaining, roll='forward')
     completion_date = pd.Timestamp(completion_date).to_pydatetime().date()
     
-    # Calculate expected progress based on ideal line
-    # This should fall exactly on the ideal line
-    # If ideal line goes from (start_date, 0) to (completion_date, today_scope)
-    # then we need to calculate how far along that line we are based on elapsed time
-    
-    # Calculate total business days from start to ideal completion
-    total_ideal_duration = np.busday_count(start_date, pd.Timestamp(completion_date).date())
-    if total_ideal_duration <= 0:
-        total_ideal_duration = 1  # Avoid division by zero
-        
-    # Calculate ideal progress as a proportion of elapsed time * total scope
-    ideal_progress_proportion = work_days_elapsed / total_ideal_duration
-    expected_progress = ideal_progress_proportion * today_scope
-    
-    # First, fix the calculation method
-    # Calculate total elapsed time and total planned time in business days
-    start_date = chart_config.start_date.date()
-    today = datetime.now().date()
-    completion_date_as_date = completion_date
-    
     # Get total business days from start to completion
-    total_plan_business_days = np.busday_count(start_date, completion_date_as_date)
+    total_plan_business_days = np.busday_count(start_date, completion_date)
     if total_plan_business_days <= 0:
         total_plan_business_days = 1  # Avoid division by zero
     
@@ -133,7 +113,16 @@ def create_progress_chart(df: pd.DataFrame, scope_df: pd.DataFrame, chart_config
         elapsed_business_days = max(1, elapsed_business_days)
     
     # Calculate expected progress as a proportion of time elapsed on the ideal line
-    progress_ratio = elapsed_business_days / total_plan_business_days
+    # Using calendar days instead of business days to ensure point falls on the line
+    days_from_start_to_today = (today - start_date).days
+    days_from_start_to_completion = (completion_date - start_date).days
+    
+    # Ensure we don't divide by zero
+    if days_from_start_to_completion <= 0:
+        days_from_start_to_completion = 1
+        
+    # Calculate expected progress using linear calendar day interpolation
+    progress_ratio = days_from_start_to_today / days_from_start_to_completion
     expected_progress = progress_ratio * today_scope
     
     # Calculate trend line
@@ -153,7 +142,7 @@ def create_progress_chart(df: pd.DataFrame, scope_df: pd.DataFrame, chart_config
         # Use numpy's busday_offset to add remaining business days to today
         projected_completion_date = np.busday_offset(today, remaining_business_days, roll='forward')
         # Convert numpy.datetime64 to datetime
-        projected_completion_date = pd.Timestamp(projected_completion_date).to_pydatetime()
+        projected_completion_date = pd.Timestamp(projected_completion_date).to_pydatetime().date()
 
     # Create the Plotly figure
     fig = go.Figure()
@@ -185,7 +174,7 @@ def create_progress_chart(df: pd.DataFrame, scope_df: pd.DataFrame, chart_config
     
     # Add ideal completion line
     fig.add_trace(go.Scatter(
-        x=[chart_config.start_date, completion_date],
+        x=[start_date, completion_date],  # Using start_date to match calculation
         y=[0, today_scope],
         name=f'Ideal Done ({completion_date.strftime("%Y-%m-%d")})',
         line=dict(color='purple', dash='dash'),
@@ -207,7 +196,7 @@ def create_progress_chart(df: pd.DataFrame, scope_df: pd.DataFrame, chart_config
         
         # Use numpy's busday_offset to add remaining business days to today
         projected_completion_date = np.busday_offset(today, remaining_business_days, roll='forward')
-        projected_completion_date = pd.Timestamp(projected_completion_date).to_pydatetime()
+        projected_completion_date = pd.Timestamp(projected_completion_date).to_pydatetime().date()
         
         # Format date for display
         date_str = projected_completion_date.strftime('%Y-%m-%d')
@@ -223,8 +212,8 @@ def create_progress_chart(df: pd.DataFrame, scope_df: pd.DataFrame, chart_config
         optimistic_completion = np.busday_offset(today, remaining_days_optimistic, roll='forward')
         pessimistic_completion = np.busday_offset(today, remaining_days_pessimistic, roll='forward')
         
-        optimistic_completion = pd.Timestamp(optimistic_completion).to_pydatetime()
-        pessimistic_completion = pd.Timestamp(pessimistic_completion).to_pydatetime()
+        optimistic_completion = pd.Timestamp(optimistic_completion).to_pydatetime().date() 
+        pessimistic_completion = pd.Timestamp(pessimistic_completion).to_pydatetime().date()
         
         # Add velocity range
         fig.add_trace(go.Scatter(
