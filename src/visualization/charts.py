@@ -5,39 +5,6 @@ import numpy as np
 import plotly.graph_objects as go
 from src.config.chart_config import ChartConfig
 
-def calculate_trend_line(valid_data: pd.DataFrame, chart_config: ChartConfig) -> Tuple[Optional[np.poly1d], Optional[float], Optional[Tuple[np.poly1d, np.poly1d]]]:
-    """Calculate trend line based on total work completed over the period."""
-    if len(valid_data) <= 1:
-        return None, chart_config.end_date, None
-    
-    # Get only the days where work was completed
-    completed_days = valid_data[valid_data['originalestimate'] > 0].copy()
-    if len(completed_days) < 2:
-        return None, chart_config.end_date, None
-    
-    # Calculate total work and days elapsed
-    total_work = completed_days['originalestimate'].sum()
-    first_day = completed_days['duedate'].min()
-    last_day = completed_days['duedate'].max()
-    #days_elapsed = (last_day - first_day).days + 1  # +1 to include both start and end days
-    days_elapsed_since_start = (datetime.now() - first_day).days + 1  # +1 to include today    
-
-    # Calculate average velocity
-    # Changed this from days_elapsed, which calculates days in the completed
-    #   range. velocity needs to be up to today.
-    velocity = total_work / days_elapsed_since_start
-
-    # Create the main trend line
-    trend_line = np.poly1d([velocity, 0])
-    
-    # Calculate a reasonable range for daily velocity variation
-    # Using 20% of the average velocity as a reasonable variation
-    variation = velocity * 0.2
-    upper_line = np.poly1d([velocity + variation, 0])
-    lower_line = np.poly1d([velocity - variation, 0])
-    
-    return trend_line, velocity, (upper_line, lower_line)
-
 def get_empty_figure() -> go.Figure:
     """Return an empty figure with a message."""
     background = 'rgba(255, 255, 255, 0.0)'
@@ -53,6 +20,38 @@ def get_empty_figure() -> go.Figure:
     )
     
     return fig_none
+
+def calculate_trend_line(valid_data: pd.DataFrame, chart_config: ChartConfig) -> Tuple[Optional[np.poly1d], Optional[float], Optional[Tuple[np.poly1d, np.poly1d]]]:
+    """Calculate trend line based on total work completed over the period."""
+    if len(valid_data) <= 1:
+        return None, None, None
+    
+    # Get the total work completed so far
+    completed_work = valid_data['cumulative_sum'].max()
+    if completed_work <= 0:
+        return None, None, None
+    
+    # Calculate business days between start date and today
+    start_date = chart_config.start_date.date()
+    today_date = datetime.now().date()
+    business_days_elapsed = np.busday_count(start_date, today_date)
+    
+    # Ensure we have at least one day to avoid division by zero
+    business_days_elapsed = max(1, business_days_elapsed)
+    
+    # Calculate expected work completion per day (in 8-hour days)
+    # If we're completing work at 12.8 hours per day instead of 8,
+    # our velocity factor will be 12.8/8 = 1.6x faster
+    velocity_factor = chart_config.hours_per_day / 8.0
+    
+    # Normalize completed work to 8-hour days
+    normalized_completed_work = completed_work
+    
+    # Calculate velocity as work completed per business day
+    velocity = normalized_completed_work / business_days_elapsed
+    
+    # No trend line function needed; we'll just plot a straight line
+    return None, velocity, None
 
 def create_progress_chart(df: pd.DataFrame, scope_df: pd.DataFrame, chart_config: ChartConfig) -> go.Figure:
     """Create and return the progress chart using Plotly."""
@@ -76,22 +75,204 @@ def create_progress_chart(df: pd.DataFrame, scope_df: pd.DataFrame, chart_config
     complete_df['cumulative_sum'] = complete_df['originalestimate'].cumsum()
     completed_today = complete_df['cumulative_sum'].max()
     
-    # Calculate completion metrics
-    today_scope = scope_df['total_estimate'].max()
-    days_needed = (today_scope * 8) / chart_config.hours_per_day
-    completion_date = chart_config.start_date + timedelta(days=days_needed)
+    # Calculate completion metrics based on current scope
+    today = datetime.now().date()
+    today_scope = scope_df[scope_df['date'] <= today]['total_estimate'].iloc[-1]
     
-    today = datetime.now()
-    work_days = (today - chart_config.start_date).total_seconds() / (3600 * 24)
-    expected_progress = (work_days * chart_config.hours_per_day) / 8
+    # Calculate total business days needed to complete the work
+    # (Scope in days * 8 hours) / hours_per_day = total work days needed
+    total_business_days_needed = (today_scope * 8) / chart_config.hours_per_day
+    
+    # Calculate how many business days have elapsed since the start
+    start_date = chart_config.start_date.date()
+    work_days_elapsed = np.busday_count(start_date, today)
+    if np.is_busday(today):
+        work_days_elapsed = max(1, work_days_elapsed)
+    
+    # Calculate how many days of work have been completed based on actual progress
+    work_days_completed = completed_today * 8 / chart_config.hours_per_day
+    
+    # Calculate remaining work days needed
+    remaining_days = total_business_days_needed - work_days_completed
+    
+    # Always round up to ensure we have enough time (ceiling function)
+    business_days_remaining = int(np.ceil(remaining_days))
+    
+    # Calculate the completion date by adding business days to today
+    completion_date = np.busday_offset(today, business_days_remaining, roll='forward')
+    completion_date = pd.Timestamp(completion_date).to_pydatetime().date()
+    
+    # Calculate expected progress based on ideal line
+    # This should fall exactly on the ideal line
+    # If ideal line goes from (start_date, 0) to (completion_date, today_scope)
+    # then we need to calculate how far along that line we are based on elapsed time
+    
+    # Calculate total business days from start to ideal completion
+    total_ideal_duration = np.busday_count(start_date, pd.Timestamp(completion_date).date())
+    if total_ideal_duration <= 0:
+        total_ideal_duration = 1  # Avoid division by zero
+        
+    # Calculate ideal progress as a proportion of elapsed time * total scope
+    ideal_progress_proportion = work_days_elapsed / total_ideal_duration
+    expected_progress = ideal_progress_proportion * today_scope
+    
+    # First, fix the calculation method
+    # Calculate total elapsed time and total planned time in business days
+    start_date = chart_config.start_date.date()
+    today = datetime.now().date()
+    completion_date_as_date = completion_date
+    
+    # Get total business days from start to completion
+    total_plan_business_days = np.busday_count(start_date, completion_date_as_date)
+    if total_plan_business_days <= 0:
+        total_plan_business_days = 1  # Avoid division by zero
+    
+    # Calculate business days elapsed
+    elapsed_business_days = np.busday_count(start_date, today)
+    if np.is_busday(today):
+        elapsed_business_days = max(1, elapsed_business_days)
+    
+    # Calculate expected progress as a proportion of time elapsed on the ideal line
+    progress_ratio = elapsed_business_days / total_plan_business_days
+    expected_progress = progress_ratio * today_scope
     
     # Calculate trend line
     valid_data = complete_df[complete_df['cumulative_sum'] > 0].copy()
     trend_line, velocity, confidence_intervals = calculate_trend_line(valid_data, chart_config)
     ideal_velocity = chart_config.hours_per_day / 8
+    
+    # Calculate projected completion date based on current trend
+    projected_completion_date = None
+    if trend_line is not None and velocity > 0:
+        # Calculate remaining work to be done
+        remaining_work = today_scope - completed_today
+        
+        # Calculate business days needed to complete the remaining work at current velocity
+        remaining_business_days = int(np.ceil(remaining_work / velocity))
+        
+        # Use numpy's busday_offset to add remaining business days to today
+        projected_completion_date = np.busday_offset(today, remaining_business_days, roll='forward')
+        # Convert numpy.datetime64 to datetime
+        projected_completion_date = pd.Timestamp(projected_completion_date).to_pydatetime()
 
     # Create the Plotly figure
     fig = go.Figure()
+    
+    # Add traces in REVERSE order of desired legend appearance
+    # (Last added appears at the top of the legend)
+    
+    # Add today's expected progress point (will be at bottom of legend)
+    fig.add_trace(go.Scatter(
+        x=[today],
+        y=[expected_progress],
+        name=f'Ideal Today ({expected_progress:.1f} days)',
+        mode='markers',
+        marker=dict(size=8, color='purple'),
+        hovertemplate='%{y:.1f} days<extra></extra>'
+    ))
+    
+    # Add scope line (will be at top of legend)
+    fig.add_trace(go.Scatter(
+        x=scope_df['date'].tolist(),
+        y=scope_df['total_estimate'].tolist(),
+        name=f'Total Scope ({today_scope:.1f} days)',
+        mode='lines',
+        line=dict(color='green', dash='dash', shape='linear'),
+        fill='tozeroy',
+        fillcolor='rgba(0,255,0,0.1)',
+        hovertemplate='%{y:.1f} day<br>%{x}<extra></extra>'
+    ))
+    
+    # Add ideal completion line
+    fig.add_trace(go.Scatter(
+        x=[chart_config.start_date, completion_date],
+        y=[0, today_scope],
+        name=f'Ideal Done ({completion_date.strftime("%Y-%m-%d")})',
+        line=dict(color='purple', dash='dash'),
+        mode='lines+markers',
+        marker=dict(
+            size=12, 
+            symbol='circle',
+            showscale=False,
+            color=['rgba(0,0,0,0)', 'purple']  # First point transparent, second point purple
+        ),
+        hoverinfo='skip'
+    ))
+    
+    # Add velocity trend line if we have calculated velocity
+    if velocity is not None and velocity > 0:
+        # Calculate projected completion date based on velocity
+        remaining_work = today_scope - completed_today
+        remaining_business_days = int(np.ceil(remaining_work / velocity))
+        
+        # Use numpy's busday_offset to add remaining business days to today
+        projected_completion_date = np.busday_offset(today, remaining_business_days, roll='forward')
+        projected_completion_date = pd.Timestamp(projected_completion_date).to_pydatetime()
+        
+        # Format date for display
+        date_str = projected_completion_date.strftime('%Y-%m-%d')
+        
+        # Calculate +/- 20% velocity points for confidence interval
+        velocity_high = velocity * 1.2  # 20% higher velocity
+        velocity_low = velocity * 0.8   # 20% lower velocity
+        
+        # Calculate confidence interval completion dates
+        remaining_days_optimistic = int(np.ceil(remaining_work / velocity_high))
+        remaining_days_pessimistic = int(np.ceil(remaining_work / velocity_low))
+        
+        optimistic_completion = np.busday_offset(today, remaining_days_optimistic, roll='forward')
+        pessimistic_completion = np.busday_offset(today, remaining_days_pessimistic, roll='forward')
+        
+        optimistic_completion = pd.Timestamp(optimistic_completion).to_pydatetime()
+        pessimistic_completion = pd.Timestamp(pessimistic_completion).to_pydatetime()
+        
+        # Add velocity range
+        fig.add_trace(go.Scatter(
+            x=[chart_config.start_date, optimistic_completion],
+            y=[0, today_scope],
+            mode='lines',
+            line=dict(width=0, color='rgba(0,0,0,0)'),
+            showlegend=False,
+            hoverinfo='skip'
+        ))
+        
+        fig.add_trace(go.Scatter(
+            x=[chart_config.start_date, pessimistic_completion],
+            y=[0, today_scope],
+            mode='lines',
+            line=dict(width=0, color='rgba(0,0,0,0)'),
+            fill='tonexty',
+            fillcolor='rgba(255,165,0,0.1)',
+            name='Velocity Range (±20%)',
+            hovertemplate='Optimistic: %{text[0]}<br>Pessimistic: %{text[1]}<extra></extra>',
+            text=[[optimistic_completion.strftime('%Y-%m-%d'), pessimistic_completion.strftime('%Y-%m-%d')]] * 2
+        ))
+        
+        # Add marker at the projected completion point
+        fig.add_trace(go.Scatter(
+            x=[projected_completion_date],
+            y=[today_scope],
+            name=f'Projected Completion ({date_str})',
+            mode='markers',
+            marker=dict(
+                size=12,
+                symbol='star',
+                color='orange',
+                line=dict(color='black', width=1)
+            ),
+            hovertemplate='Projected completion date: %{x}<br>%{y:.1f} days<extra></extra>'
+        ))
+        
+        # Add simple trend line from start to projected completion
+        fig.add_trace(go.Scatter(
+            x=[chart_config.start_date, projected_completion_date],
+            y=[0, today_scope],
+            name=f'Velocity ({velocity:.2f}/{ideal_velocity:.2f})',
+            mode='lines',
+            line=dict(color='orange', dash='dash', width=2),
+            hovertemplate='Current velocity: %{text}<extra></extra>',
+            text=[f"{velocity:.2f}/{ideal_velocity:.2f}"] * 2,
+        ))
     
     # Add completed work line
     fig.add_trace(go.Scatter(
@@ -104,79 +285,6 @@ def create_progress_chart(df: pd.DataFrame, scope_df: pd.DataFrame, chart_config
         fillcolor='rgba(0,0,255,0.3)',
         connectgaps=True,
         hovertemplate='%{y:.1f} days<br>%{x}<extra></extra>'
-    ))
-        
-    # Add today's expected progress point
-    fig.add_trace(go.Scatter(
-        x=[today],
-        y=[expected_progress],
-        name=f'Ideal Today ({expected_progress:.1f} days)',
-        mode='markers',
-        marker=dict(size=8, color='purple'),
-        hovertemplate='%{y:.1f} days<extra></extra>'
-    ))
-    
-    # Add velocity trend line and confidence intervals if available
-    if trend_line is not None:
-        # Calculate days from start for each date
-        days_from_start = [(d - chart_config.start_date).days for d in complete_df['duedate']]
-        trend_values = trend_line(days_from_start)
-        
-        # Add the main trend line
-        fig.add_trace(go.Scatter(
-            x=complete_df['duedate'].tolist(),
-            y=trend_values.tolist(),
-            name=f'Velocity ({velocity:.1f}/{ideal_velocity:.1f} days)',
-            mode='lines',
-            line=dict(color='orange', dash='dash', width=2, shape='linear'),
-            hoverinfo='skip',
-#            customdata=[velocity] * len(complete_df),
-#            hovertemplate='%{customdata:.1f} days<extra></extra>',
-        ))
-        
-        # Add confidence intervals if available
-        if confidence_intervals is not None:
-            upper_line, lower_line = confidence_intervals
-            upper_values = upper_line(days_from_start)
-            lower_values = lower_line(days_from_start)
-            
-            # Add the confidence interval area
-            fig.add_trace(go.Scatter(
-                x=complete_df['duedate'].tolist() + complete_df['duedate'].tolist()[::-1],
-                y=upper_values.tolist() + lower_values.tolist()[::-1],
-                name='Velocity Range (±20%)',
-                fill='toself',
-                fillcolor='rgba(255,165,0,0.1)',
-                line=dict(color='rgba(255,165,0,0)'),
-                hoverinfo='skip'
-            ))
-    
-    # Add ideal completion line
-    fig.add_trace(go.Scatter(
-        x=[chart_config.start_date, completion_date],
-        y=[0, today_scope],
-        name=f'Ideal Done ({completion_date.strftime("%Y-%m-%d")})',
-        line=dict(color='purple', dash='dash'),
-        mode='lines+markers',
-        marker=dict(
-            size=10, 
-            symbol='star',
-            showscale=False,
-            color=['rgba(0,0,0,0)', 'purple']  # First point transparent, second point purple
-        ),
-        hoverinfo='skip'
-    ))
-
-    # Add scope line
-    fig.add_trace(go.Scatter(
-        x=scope_df['date'].tolist(),
-        y=scope_df['total_estimate'].tolist(),
-        name=f'Total Scope ({today_scope:.1f} days)',
-        mode='lines',
-        line=dict(color='green', dash='dash', shape='linear'),
-        fill='tozeroy',
-        fillcolor='rgba(0,255,0,0.1)',
-        hovertemplate='%{y:.1f} day<br>%{x}<extra></extra>'
     ))
     
     # Update layout
@@ -213,3 +321,8 @@ def create_progress_chart(df: pd.DataFrame, scope_df: pd.DataFrame, chart_config
     )
     
     return fig 
+
+def create_scope_change_barchart() -> go.Figure:
+    """Create a bar chart for scope changes."""
+    fig = get_empty_figure()
+    return fig
