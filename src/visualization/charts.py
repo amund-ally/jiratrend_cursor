@@ -98,12 +98,18 @@ def create_progress_chart(df: pd.DataFrame, scope_df: pd.DataFrame, chart_config
     # Always round up to ensure we have enough time (ceiling function)
     business_days_remaining = int(np.ceil(remaining_days))
     
+    # Alternative calculation for completion date (independent of current progress)
+    # This will give a fixed completion date based only on start date, scope and rate
+    total_days_needed = (today_scope * 8) / chart_config.hours_per_day
+    pure_completion_date = np.busday_offset(start_date, int(np.ceil(total_days_needed)), roll='forward')
+    pure_completion_date = pd.Timestamp(pure_completion_date).to_pydatetime().date()
+
     # Calculate the completion date by adding business days to today
     completion_date = np.busday_offset(today, business_days_remaining, roll='forward')
     completion_date = pd.Timestamp(completion_date).to_pydatetime().date()
     
     # Get total business days from start to completion
-    total_plan_business_days = np.busday_count(start_date, completion_date)
+    total_plan_business_days = np.busday_count(start_date, pure_completion_date)
     if total_plan_business_days <= 0:
         total_plan_business_days = 1  # Avoid division by zero
     
@@ -115,7 +121,7 @@ def create_progress_chart(df: pd.DataFrame, scope_df: pd.DataFrame, chart_config
     # Calculate expected progress as a proportion of time elapsed on the ideal line
     # Using calendar days instead of business days to ensure point falls on the line
     days_from_start_to_today = (today - start_date).days
-    days_from_start_to_completion = (completion_date - start_date).days
+    days_from_start_to_completion = (pure_completion_date - start_date).days
     
     # Ensure we don't divide by zero
     if days_from_start_to_completion <= 0:
@@ -150,7 +156,7 @@ def create_progress_chart(df: pd.DataFrame, scope_df: pd.DataFrame, chart_config
     # Add traces in REVERSE order of desired legend appearance
     # (Last added appears at the top of the legend)
     
-    # Add today's expected progress point (will be at bottom of legend)
+    # Add today's expected progress point
     fig.add_trace(go.Scatter(
         x=[today],
         y=[expected_progress],
@@ -159,8 +165,23 @@ def create_progress_chart(df: pd.DataFrame, scope_df: pd.DataFrame, chart_config
         marker=dict(size=8, color='purple'),
         hovertemplate='%{y:.1f} days<extra></extra>'
     ))
+
+    # # Add pure completion date point
+    # fig.add_trace(go.Scatter(
+    #     x=[pure_completion_date],
+    #     y=[today_scope],
+    #     name=f'Pure completion ({pure_completion_date.strftime("%Y-%m-%d")})',
+    #     mode='markers',
+    #     marker=dict(
+    #         size=8, 
+    #         symbol='x',
+    #         showscale=False,
+    #         color=['green']  # First point transparent, second point purple
+    #     ),
+    #     hovertemplate='%{x} <extra></extra>'
+    # ))
     
-    # Add scope line (will be at top of legend)
+    # Add scope line
     fig.add_trace(go.Scatter(
         x=scope_df['date'].tolist(),
         y=scope_df['total_estimate'].tolist(),
@@ -174,9 +195,9 @@ def create_progress_chart(df: pd.DataFrame, scope_df: pd.DataFrame, chart_config
     
     # Add ideal completion line
     fig.add_trace(go.Scatter(
-        x=[start_date, completion_date],  # Using start_date to match calculation
+        x=[start_date, pure_completion_date],  # Using start_date to match calculation
         y=[0, today_scope],
-        name=f'Ideal Done ({completion_date.strftime("%Y-%m-%d")})',
+        name=f'Ideal Done ({pure_completion_date.strftime("%Y-%m-%d")})',
         line=dict(color='purple', dash='dash'),
         mode='lines+markers',
         marker=dict(
