@@ -1,5 +1,6 @@
 import streamlit as st
-import time
+import numpy as np
+import pandas as pd
 from datetime import datetime, timedelta
 from src.config.jira_config import JiraConfig
 from src.config.chart_config import ChartConfig
@@ -202,7 +203,7 @@ def create_ui():
         st.plotly_chart(fig, use_container_width=True)
 
         # Display summary statistics
-        col1, col2, col3 = st.columns(3)
+        col1, col2, col3, col4 = st.columns(4)
 
         with col1:
             total_scope = scope_df['total_estimate'].max()
@@ -227,6 +228,14 @@ def create_ui():
                 "Remaining Work",
                 f"{remaining_work:.1f} days",
                 help="Remaining work in days"
+            )
+
+        with col4:
+            days_since_last_completed = np.busday_count(pd.Timestamp(completed_df['duedate'].max()).date(), datetime.now().date())
+            st.metric(
+                "Work Days Since Last Completed",
+                f"{days_since_last_completed} days",
+                help="Weekdays since the last completed issue"
             )
 
         # Create and display tables
