@@ -233,7 +233,7 @@ def create_ui():
         with col4:
             days_since_last_completed = np.busday_count(pd.Timestamp(completed_df['duedate'].max()).date(), datetime.now().date())
             st.metric(
-                "Work Days Since Last Completed",
+                "Weekdays Since Last Completed",
                 f"{days_since_last_completed} days",
                 help="Weekdays since the last completed issue"
             )

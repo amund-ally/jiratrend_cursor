@@ -1,5 +1,7 @@
 from collections import namedtuple
 import pandas as pd
+import datetime as datetime
+import numpy as np
 import plotly.graph_objects as go
 
 Table_Figures = namedtuple('Tables', ['completed', 'stats'])
@@ -122,10 +124,24 @@ def create_completed_table(filtered_df: pd.DataFrame) -> go.Figure:
 
     sorted_df = filtered_df.sort_values(by='Due Date', ascending=False)
 
-    # Create the completed issues table
+    ## Add a column showing business days between completion dates
+    # Create a shifted series for the previous date (next row's date)
+    previous_dates = pd.to_datetime(sorted_df['Due Date'].shift(-1)).dt.date
+    due_dates = pd.to_datetime(sorted_df['Due Date']).dt.date
+    
+    # Calculate business days between each row and the next
+    days_between = []
+    for current, previous in zip(due_dates, previous_dates):
+        if pd.isna(previous):
+            days_between.append("")  # Last row has no "next" date
+        else:
+            days_between.append(np.busday_count(previous, current))
+    sorted_df['Days Since Previous'] = days_between
+
+    ## Create the completed issues table
     completed_issues_fig = go.Figure(data=[go.Table(
         header=dict(
-            values=['Issue', 'Date Completed', 'Est Time(d)', 'Actual Time(d)'],
+            values=['Issue', 'Date Completed', 'Weekdays Since', 'Est Time(d)', 'Actual Time(d)'],
             fill_color='rgba(200,200,200,0.3)',
             font=dict(color='black', size=14),
             align='left'
@@ -134,6 +150,7 @@ def create_completed_table(filtered_df: pd.DataFrame) -> go.Figure:
             values=[
                 sorted_df['Issue'],
                 sorted_df['Due Date'].astype(str),
+                sorted_df['Days Since Previous'],
                 sorted_df['Est Time'].apply(lambda x: f'{x:.2f}'),
                 sorted_df['Actual Time'].apply(lambda x: f'{x:.2f}'),
             ],
