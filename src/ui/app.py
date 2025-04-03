@@ -5,8 +5,9 @@ from datetime import datetime, timedelta
 from src.config.jira_config import JiraConfig
 from src.config.chart_config import ChartConfig
 from src.data.jira_client import get_jira_data
-from src.visualization.charts import create_progress_chart
-from src.visualization.tables import create_tables
+from src.visualization.charts import create_progress_chart, create_state_time_chart
+from src.visualization.tables import create_tables, create_state_time_dataframe
+
 
 def get_metrics_explanation():
     """Returns the explanation text for the metrics panel."""
@@ -44,6 +45,7 @@ def get_metrics_explanation():
     4. Use Accuracy % to set confidence intervals for future estimates
     """
 
+
 def create_ui():
     """Create and run the Streamlit UI."""
     # Configure the page with optimized settings
@@ -57,7 +59,7 @@ def create_ui():
             'About': None
         }
     )
-    
+
     # Disable animations
     st.markdown("""
         <style>
@@ -67,9 +69,7 @@ def create_ui():
         }
         </style>
     """, unsafe_allow_html=True)
-    
-    st.title("Charts")
-    
+        
     # Sidebar for configuration
     with st.sidebar:
         # Create tabs for different configurations
@@ -196,56 +196,96 @@ def create_ui():
         
         # Fetch and process data
         with st.spinner("Fetching JIRA data..."):
-            completed_df, scope_df = get_jira_data(jira_config, chart_config)
-        
-        # Create and display the chart
-        fig = create_progress_chart(completed_df, scope_df, chart_config)
-        st.plotly_chart(fig, use_container_width=True)
+            completed_df, scope_df, state_time_df = get_jira_data(
+                jira_config, chart_config)
 
-        # Display summary statistics
-        col1, col2, col3, col4 = st.columns(4)
+        tab1, tab2 = st.tabs(["Burnup Chart", "Issue Analysis"])
 
-        with col1:
-            total_scope = scope_df['total_estimate'].max()
-            st.metric(
-                "Total Scope",
-                f"{total_scope:.1f} days",
-                help="Total estimated work in days",
-            )
-        
-        with col2:
-            # Only count completed issues (those with a duedate)
-            completed_work = completed_df[completed_df['duedate'].notna()]['originalestimate'].sum()
-            st.metric(
-                "Completed Work",
-                f"{completed_work:.1f} days",
-                help="Total completed work in days"
-            )
-        
-        with col3:
-            remaining_work = total_scope - completed_work
-            st.metric(
-                "Remaining Work",
-                f"{remaining_work:.1f} days",
-                help="Remaining work in days"
-            )
+        with tab1:
+            st.subheader("Burnup Chart")
+            # Create and display the chart
+            fig = create_progress_chart(completed_df, scope_df, chart_config)
+            st.plotly_chart(fig, use_container_width=True)
 
-        with col4:
-            days_since_last_completed = np.busday_count(pd.Timestamp(completed_df['duedate'].max()).date(), datetime.now().date())
-            st.metric(
-                "Weekdays Since Last Completed",
-                f"{days_since_last_completed} days",
-                help="Weekdays since the last completed issue"
-            )
+            # Display summary statistics
+            col1, col2, col3, col4 = st.columns(4)
 
-        # Create and display tables
-        tables = create_tables(completed_df)
-        st.plotly_chart(tables.completed, use_container_width=True)
-        st.plotly_chart(tables.stats, use_container_width=True)
-        
-        # Add collapsible metrics explanation
-        with st.expander("📊 Understanding the Metrics", expanded=False):
-            st.markdown(get_metrics_explanation())
+            with col1:
+                total_scope = scope_df['total_estimate'].max()
+                st.metric(
+                    "Total Scope",
+                    f"{total_scope:.1f} days",
+                    help="Total estimated work in days",
+                )
+
+            with col2:
+                # Only count completed issues (those with a duedate)
+                completed_work = completed_df[completed_df['duedate'].notna()]['originalestimate'].sum()
+                st.metric(
+                    "Completed Work",
+                    f"{completed_work:.1f} days",
+                    help="Total completed work in days"
+                )
+
+            with col3:
+                remaining_work = total_scope - completed_work
+                st.metric(
+                    "Remaining Work",
+                    f"{remaining_work:.1f} days",
+                    help="Remaining work in days"
+                )
+
+            with col4:
+                days_since_last_completed = np.busday_count(pd.Timestamp(completed_df['duedate'].max()).date(), datetime.now().date())
+                st.metric(
+                    "Weekdays Since Last Completed",
+                    f"{days_since_last_completed} days",
+                    help="Weekdays since the last completed issue"
+                )
+
+            # Create and display tables
+            tables = create_tables(completed_df)
+            st.plotly_chart(tables.completed, use_container_width=True)
+            st.plotly_chart(tables.stats, use_container_width=True)
+
+            # Add collapsible metrics explanation
+            with st.expander("📊 Understanding the Metrics", expanded=False):
+                st.markdown(get_metrics_explanation())
+        with tab2:
+            # Display issue analysis data
+            st.subheader("Issue Analysis")
+
+            # Add explanatory text
+            st.info("""
+            This analysis shows how much time issues spend in each state. 
+            The chart below highlights issues that spend unusually long time in certain states.
+            
+            - Blue diamonds show average time in each state
+            - Red points indicate issues that took more than twice the average time
+            """)
+
+            # Add state time chart and table
+            state_time_chart = create_state_time_chart(state_time_df)
+            st.plotly_chart(state_time_chart, use_container_width=True)
+
+            # Add state time table
+            state_time_table_df = create_state_time_dataframe(state_time_df)
+            st.dataframe(
+                state_time_table_df,
+                column_config={
+                    "Issue": None,
+                    "Issue URL": st.column_config.LinkColumn(
+                        "Issue",
+                        help="Click to open in Jira",
+                        display_text=r"https:\/\/agrium\.atlassian\.net\/browse\/(.*)"
+                    ),
+                    **{col: st.column_config.NumberColumn(
+                        col, format="%.2f", width="small"
+                    ) for col in state_time_table_df.columns if col != "Issue" and col != "Issue URL"},
+                },
+                use_container_width=True,
+                hide_index=True,
+            )
 
     except Exception as e:
         st.error(f"Error: {str(e)}")

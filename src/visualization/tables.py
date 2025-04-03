@@ -138,10 +138,12 @@ def create_completed_table(filtered_df: pd.DataFrame) -> go.Figure:
             days_between.append(np.busday_count(previous, current))
     sorted_df['Days Since Previous'] = days_between
 
+    ## Add columns showing time in each state
+
     ## Create the completed issues table
     completed_issues_fig = go.Figure(data=[go.Table(
         header=dict(
-            values=['Issue', 'Date Completed', 'Weekdays Since', 'Est Time(d)', 'Actual Time(d)'],
+            values=['Issue', 'Date Completed', 'τ Passed', 'Est Time(d)', 'Actual Time(d)'],
             fill_color='rgba(200,200,200,0.3)',
             font=dict(color='black', size=14),
             align='left'
@@ -158,7 +160,8 @@ def create_completed_table(filtered_df: pd.DataFrame) -> go.Figure:
             font=dict(color='black', size=12),
             align='left',
             height=row_height,
-        )
+        ),
+        columnwidth=[0.5, 0.7, 0.5, 0.5, 0.5]
     )])
 
     completed_issues_fig.update_layout(
@@ -169,3 +172,103 @@ def create_completed_table(filtered_df: pd.DataFrame) -> go.Figure:
     )
     
     return completed_issues_fig
+
+def create_state_time_table(state_time_df: pd.DataFrame) -> go.Figure:
+    """Create a table showing time spent in each state for each issue."""
+    # Check if there's data to display
+    if state_time_df.empty:
+        return go.Figure()
+    
+    # Sort by Issue key
+    sorted_df = state_time_df.sort_values('Issue')
+    
+    # Define the desired state order
+    desired_state_order = ['In Progress', 'In Review', 'In PO Review', 'Blocked', 'Done']
+    
+    # Ensure all desired columns exist, add them if they don't
+    for state in desired_state_order:
+        if state not in sorted_df.columns:
+            sorted_df[state] = np.nan
+
+    # Get all state columns (excluding 'Issue')
+    state_columns = [col for col in sorted_df.columns if col != 'Issue']
+    
+    # Calculate column headers - Issue + all states
+    headers = ['Issue'] + state_columns
+    
+    # Calculate column values
+    values = [sorted_df['Issue']]
+    for state in state_columns:
+        values.append(sorted_df[state].apply(
+            lambda x: f'{x:.2f}' if pd.notna(x) and x > 0 else ""
+        ))
+    
+    # Calculate dynamic height based on number of rows
+    row_height = 30  # matches cell height
+    padding = 50     # extra space for title and margins
+    table_height = (len(sorted_df) + 1) * row_height + padding
+    
+    # Create table
+    fig = go.Figure(data=[go.Table(
+        header=dict(
+            values=headers,
+            fill_color='rgba(200,200,200,0.3)',
+            font=dict(color='black', size=14),
+            align='left'
+        ),
+        cells=dict(
+            values=values,
+            fill_color='rgba(200,200,200,0.1)',
+            font=dict(color='black', size=12),
+            align='left',
+            height=row_height,
+        ),
+        editable=True
+    )])
+    
+    fig.update_layout(
+        height=table_height,
+        title='Time Spent in Each State (Days)',
+        margin=dict(t=30, b=0)
+    )
+    
+    return fig
+
+def create_state_time_dataframe(state_time_df: pd.DataFrame) -> pd.DataFrame:
+    """
+    Create a DataFrame showing time spent in each state for each issue,
+    with the same columns, names, values, and initial order as create_state_time_table.
+    """
+    # Check if there's data to display
+    if state_time_df.empty:
+        return pd.DataFrame()
+    
+    # Sort by Issue key
+    sorted_df = state_time_df.sort_values('Issue').copy()
+    
+    sorted_df['Issue URL'] = sorted_df['Issue'].apply(
+        lambda x: f"https://agrium.atlassian.net/browse/{x}"
+    )
+
+    # Define the desired state order
+    desired_state_order = ['In Progress', 'In Review', 'In PO Review', 'Blocked']
+    
+    # Ensure all desired columns exist, add them if they don't
+    for state in desired_state_order:
+        if state not in sorted_df.columns:
+            sorted_df[state] = np.nan
+    
+    # Get state columns in desired order (excluding 'Issue')
+    state_columns = [col for col in desired_state_order if col in sorted_df.columns]
+    
+    # Reorder columns to put Issue first followed by state columns in desired order
+    sorted_df = sorted_df[['Issue', 'Issue URL'] + state_columns]
+    
+    # Format the numeric values to 2 decimal places, but only for non-NaN values
+    for state in state_columns:
+        # Format the values but leave NaN values as is
+        sorted_df[state] = sorted_df[state].apply(
+            lambda x: round(x, 2) if pd.notna(x) and x > 0 else np.nan
+        )
+    
+    return sorted_df

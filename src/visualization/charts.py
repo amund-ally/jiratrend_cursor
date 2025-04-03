@@ -336,3 +336,124 @@ def create_scope_change_barchart() -> go.Figure:
     """Create a bar chart for scope changes."""
     fig = get_empty_figure()
     return fig
+
+def create_state_time_chart(state_time_df: pd.DataFrame) -> go.Figure:
+    """Create a chart showing time spent in each state for all issues."""
+    if state_time_df.empty:
+        return get_empty_figure()
+    
+    # Get all state columns (excluding 'Issue')
+    state_columns = [col for col in state_time_df.columns if col != 'Issue']
+    
+    # Calculate averages for each state
+    state_averages = {state: state_time_df[state].mean() for state in state_columns}
+    
+    # Calculate thresholds (2x the average)
+    state_thresholds = {state: avg * 2 for state, avg in state_averages.items()}
+    
+    # Create figure
+    fig = go.Figure()
+    
+    # Create lists to collect all data points by category
+    normal_x = []
+    normal_y = []
+    normal_text = []
+    
+    outlier_x = []
+    outlier_y = []
+    outlier_text = []
+    
+    avg_x = []
+    avg_y = []
+    
+    # Process all states at once
+    for state in state_columns:
+        # Find which points are above threshold
+        above_threshold = state_time_df[state] > state_thresholds[state]
+        
+        # Collect normal points
+        normal_mask = ~above_threshold & ~state_time_df[state].isna()
+        if normal_mask.any():
+            normal_points = state_time_df[normal_mask]
+            normal_x.extend([state] * len(normal_points))
+            normal_y.extend(normal_points[state].values)
+            normal_text.extend(normal_points['Issue'].values)
+        
+        # Collect outlier points
+        if above_threshold.any():
+            outlier_points = state_time_df[above_threshold]
+            outlier_x.extend([state] * len(outlier_points))
+            outlier_y.extend(outlier_points[state].values)
+            outlier_text.extend(outlier_points['Issue'].values)
+        
+        # Collect average points
+        if not pd.isna(state_averages[state]):
+            avg_x.append(state)
+            avg_y.append(state_averages[state])
+    
+    # Add all normal points as a single trace
+    if normal_x:
+        fig.add_trace(go.Scatter(
+            x=normal_x,
+            y=normal_y,
+            mode='markers',
+            name='Issues',
+            marker=dict(
+                size=8,
+                opacity=0.7,
+                line=dict(width=1, color='black')
+            ),
+            text=normal_text,
+            hovertemplate='%{text}: %{y:.2f} days<extra></extra>'
+        ))
+    
+    # Add all outlier points as a single trace
+    if outlier_x:
+        fig.add_trace(go.Scatter(
+            x=outlier_x,
+            y=outlier_y,
+            mode='markers',
+            name='Outliers',
+            marker=dict(
+                size=10,
+                color='red',
+                opacity=0.7,
+                line=dict(width=1, color='black')
+            ),
+            text=outlier_text,
+            hovertemplate='%{text}: %{y:.2f} days<extra></extra>'
+        ))
+    
+    # Add all average markers as a single trace
+    if avg_x:
+        fig.add_trace(go.Scatter(
+            x=avg_x,
+            y=avg_y,
+            mode='markers',
+            marker=dict(size=10, symbol='diamond', color='blue'),
+            name='Averages',
+            hovertemplate='Average: %{y:.2f} days<extra></extra>'
+        ))
+    
+    # Update layout
+    fig.update_layout(
+        title='Time Spent in Each State',
+        xaxis_title='',
+        yaxis_title='Days',
+        hovermode='closest',
+        height=600,
+        xaxis=dict(
+            categoryorder='array',
+            categoryarray=state_columns
+        ),
+        legend=dict(
+            yanchor="top",
+            y=1,
+            xanchor="left",
+            x=1.02,
+            bordercolor="lightgray",
+            borderwidth=1
+        )
+    )
+    
+    return fig

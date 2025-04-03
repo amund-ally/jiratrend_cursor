@@ -154,9 +154,6 @@ def get_actual_completion_data(issues: dict) -> pd.DataFrame:
         
         for issueHistory in issueRecord['issuehistory']:
             for historyItem in issueHistory['items']:
-                if index == 'DS-11656':
-                    print(historyItem)
-
                 if historyItem['field'] == 'status':
                     statusRecord = { "created":[issueHistory['created']], "fromStatusId":[historyItem['from']], "fromStatusString" : [historyItem['fromString']], "toStatusId": [historyItem['to']], "toStatusString": [historyItem['toString']]}
                     
@@ -182,6 +179,7 @@ def get_actual_completion_data(issues: dict) -> pd.DataFrame:
             # 10645 = In Review
             # 10001 = Done
             # 10100 = In PO Review
+            # 10600 = Blocked
             fromStatusId = row['fromStatusId']
             #toStatusId = row['toStatusId']
             #moving from In Progress, In PO Review or In Review to anything
@@ -195,6 +193,111 @@ def get_actual_completion_data(issues: dict) -> pd.DataFrame:
     data['timespentworking'] = workingTime
     return data[['timespentworking', 'status']].copy()
 
+def get_state_time_analysis(issues: dict) -> pd.DataFrame:
+    """
+    Calculate how much time each issue spent in each Jira state.
+    Returns a DataFrame with issue keys and time spent in each state.
+    """
+    changelogList = {issue.key: issue.raw['changelog'] for issue in issues}
+    issueList = {issue.key: issue.raw['fields'] for issue in issues}
+
+    data = pd.DataFrame.from_dict(issueList, orient='index')
+    data['changelog'] = changelogList
+    data['issuehistory'] = [issueRecord.get('histories') for issueRecord in data['changelog']]
+    data['status'] = [issueRecord.get('name') for issueRecord in data['status']]
+    
+    # Define tracked states
+    tracked_status_ids = {
+        '10500': 'In Progress', 
+        '10645': 'In Review',
+        '10100': 'In PO Review',
+        '10600': 'Blocked'
+    }
+
+    # Process status changes for each issue
+    state_time_data = []
+    
+    for index, issueRecord in data.iterrows():
+        # Create a list to store all status transitions
+        transitions = []
+        
+        # Add initial state when created
+        transitions.append({
+            'timestamp': pd.to_datetime(issueRecord['created'], utc=True),
+            'toStatus': '10000',  # Assuming 'To Do' is the initial state
+            'toStatusName': 'To Do'
+        })
+
+        # Track if issue has any transitions to tracked states
+        has_tracked_state_transitions = False        
+        
+        # Add all transitions from history
+        for issueHistory in issueRecord['issuehistory']:
+            for historyItem in issueHistory['items']:
+                if historyItem['field'] == 'status':
+                    # Check if this transition is to a tracked state
+                    if historyItem['to'] in tracked_status_ids:
+                        has_tracked_state_transitions = True
+
+                    transitions.append({
+                        'timestamp': pd.to_datetime(issueHistory['created'], utc=True),
+                        'toStatus': historyItem['to'],
+                        'toStatusName': historyItem['toString']
+                    })
+
+        # Skip issues with no transitions or only the initial state
+        if len(transitions) <= 1 or not has_tracked_state_transitions:
+            continue
+
+        # Sort transitions by timestamp
+        transitions.sort(key=lambda x: x['timestamp'])
+        
+        # Calculate time spent in each state
+        state_times = {state: 0 for state in tracked_status_ids.values()}
+        
+        # Process each transition
+        for i in range(1, len(transitions)):
+            prev_timestamp = transitions[i-1]['timestamp']
+            curr_timestamp = transitions[i]['timestamp']
+            
+            # The state we're transitioning FROM is the state we were IN
+            from_state = transitions[i-1]['toStatus']
+            
+            # Only count time for tracked states
+            if from_state in tracked_status_ids:
+                state_name = tracked_status_ids[from_state]
+                duration_seconds = (curr_timestamp - prev_timestamp).total_seconds()
+                state_times[state_name] += duration_seconds / (60*60*24)  # Convert to days
+        
+        # For the current (final) state, calculate time until now
+        final_state = transitions[-1]['toStatus']
+        final_timestamp = transitions[-1]['timestamp']
+        now = pd.Timestamp.utcnow()
+        
+        if final_state in tracked_status_ids:
+            state_name = tracked_status_ids[final_state]
+            duration_seconds = (now - final_timestamp).total_seconds()
+            state_times[state_name] += duration_seconds / (60*60*24)  # Convert to days
+        
+        # Skip issues where no time was spent in any tracked state
+        if all(time_spent == 0 for time_spent in state_times.values()):
+            continue
+
+        # Create issue data record
+        issue_data = {'Issue': index}
+        
+        # Add time for each tracked state
+        for state, time_spent in state_times.items():
+            if time_spent >= 0.01:  # Only add states where time was spent
+                issue_data[state] = time_spent
+        
+        state_time_data.append(issue_data)
+    
+    # Create DataFrame
+    state_time_df = pd.DataFrame(state_time_data)
+    
+    return state_time_df
+
 def get_jira_data(jira_config: JiraConfig, chart_config: ChartConfig) -> Tuple[pd.DataFrame, pd.DataFrame]:
     """Fetch and process JIRA data."""
     jira = get_jira_client(jira_config)
@@ -206,4 +309,7 @@ def get_jira_data(jira_config: JiraConfig, chart_config: ChartConfig) -> Tuple[p
     actual_completed_df = get_actual_completion_data(issues)
     completed_df = get_completed_work_data(issues, actual_completed_df)
 
-    return completed_df, scope_df
+    # Get state time analysis data
+    state_time_df = get_state_time_analysis(issues)
+
+    return completed_df, scope_df, state_time_df
