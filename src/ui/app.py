@@ -5,9 +5,8 @@ from datetime import datetime, timedelta
 from src.config.jira_config import JiraConfig
 from src.config.chart_config import ChartConfig
 from src.data.jira_client import get_jira_data
-from src.visualization.charts import create_progress_chart, create_state_time_chart
+from src.visualization.charts import create_progress_chart, create_state_time_chart, create_state_time_boxplot
 from src.visualization.tables import create_tables, create_state_time_dataframe
-
 
 def get_metrics_explanation():
     """Returns the explanation text for the metrics panel."""
@@ -204,7 +203,47 @@ def create_ui():
         with tab1:
             st.subheader("Burnup Chart")
             # Create and display the chart
-            fig = create_progress_chart(completed_df, scope_df, chart_config)
+
+            with st.expander("Simluation", expanded=False):
+                with st.form(key="simulation_form"):
+                    st.slider(
+                        "What if the team completed additional work today?",
+                        min_value=0.0,
+                        max_value=20.0,
+                        value=st.session_state.get('what_if_days', 0.0),  # Persist value between sessions
+                        key="what_if_days",
+                        step=1.0,
+                        help="Simulate additional completed work (in days) to see how it affects the project timeline"
+                    )
+                    
+                    # Add more simulation parameters as needed
+                    st.slider(
+                        "Adjust velocity multiplier",
+                        min_value=0.5,
+                        max_value=2.0, 
+                        value=st.session_state.get('velocity_multiplier', 1.0),
+                        key="velocity_multiplier",
+                        step=0.1,
+                        help="Simulate increased/decreased team velocity (1.0 = no change)"
+                    )                         
+                    
+                    # Add a "Run Simulation" button to apply all changes at once
+                    st.form_submit_button("Run Simulation")
+
+            # Get values to pass to the chart function (with defaults if not set)
+            simulation_what_if_days = st.session_state.get('what_if_days', 0.0)
+            simulation_velocity_multiplier = st.session_state.get('velocity_multiplier', 1.0)
+
+            # Pass the what_if_days to the chart creation function
+            fig = create_progress_chart(
+                completed_df, 
+                scope_df, 
+                chart_config, 
+                what_if_days=simulation_what_if_days,
+                velocity_multiplier=simulation_velocity_multiplier
+            )
+
+            # fig = create_progress_chart(completed_df, scope_df, chart_config)
             st.plotly_chart(fig, use_container_width=True)
 
             # Display summary statistics
@@ -221,18 +260,34 @@ def create_ui():
             with col2:
                 # Only count completed issues (those with a duedate)
                 completed_work = completed_df[completed_df['duedate'].notna()]['originalestimate'].sum()
+                what_if_completed = completed_work + simulation_what_if_days
+                
+                label = "Completed Work" if simulation_what_if_days == 0 else f"Completed Work (with +{simulation_what_if_days:.1f})"
+                value = f"{completed_work:.1f} days" if simulation_what_if_days == 0 else f"{what_if_completed:.1f} days"
+                delta = f"+{simulation_what_if_days:.1f}" if simulation_what_if_days > 0 else None
+                
                 st.metric(
-                    "Completed Work",
-                    f"{completed_work:.1f} days",
-                    help="Total completed work in days"
+                    label,
+                    value,
+                    delta=delta,
+                    help="Total completed work in days (including 'what if' scenario if applicable)"
                 )
 
             with col3:
                 remaining_work = total_scope - completed_work
+                what_if_remaining = total_scope - what_if_completed
+                
+                label = "Remaining Work" if simulation_what_if_days == 0 else f"Remaining Work (with +{simulation_what_if_days:.1f})"
+                value = f"{remaining_work:.1f} days" if simulation_what_if_days == 0 else f"{what_if_remaining:.1f} days"
+                delta = f"-{simulation_what_if_days:.1f}" if simulation_what_if_days > 0 else None
+                delta_color = "inverse" if simulation_what_if_days > 0 else "normal"
+                
                 st.metric(
-                    "Remaining Work",
-                    f"{remaining_work:.1f} days",
-                    help="Remaining work in days"
+                    label,
+                    value,
+                    delta=delta,
+                    delta_color=delta_color,
+                    help="Remaining work in days (accounting for 'what if' scenario if applicable)"
                 )
 
             with col4:
@@ -265,8 +320,8 @@ def create_ui():
             """)
 
             # Add state time chart and table
-            state_time_chart = create_state_time_chart(state_time_df)
-            st.plotly_chart(state_time_chart, use_container_width=True)
+            state_time_chart = create_state_time_boxplot(state_time_df)
+            st.plotly_chart(state_time_chart, use_container_width=False)
 
             # Add state time table
             state_time_table_df = create_state_time_dataframe(state_time_df)

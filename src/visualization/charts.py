@@ -1,5 +1,4 @@
-from datetime import datetime, timedelta
-from typing import Dict, List, Tuple, Optional
+from datetime import datetime
 import pandas as pd
 import numpy as np
 import plotly.graph_objects as go
@@ -21,28 +20,23 @@ def get_empty_figure() -> go.Figure:
     
     return fig_none
 
-def calculate_trend_line(valid_data: pd.DataFrame, chart_config: ChartConfig) -> Tuple[Optional[np.poly1d], Optional[float], Optional[Tuple[np.poly1d, np.poly1d]]]:
+def calculate_velocity(valid_data: pd.DataFrame, start_date: datetime) -> float:
     """Calculate trend line based on total work completed over the period."""
     if len(valid_data) <= 1:
-        return None, None, None
+        return None
     
     # Get the total work completed so far
     completed_work = valid_data['cumulative_sum'].max()
     if completed_work <= 0:
-        return None, None, None
+        return None
     
     # Calculate business days between start date and today
-    start_date = chart_config.start_date.date()
+    start_date = start_date.date()
     today_date = datetime.now().date()
     business_days_elapsed = np.busday_count(start_date, today_date)
     
     # Ensure we have at least one day to avoid division by zero
     business_days_elapsed = max(1, business_days_elapsed)
-    
-    # Calculate expected work completion per day (in 8-hour days)
-    # If we're completing work at 12.8 hours per day instead of 8,
-    # our velocity factor will be 12.8/8 = 1.6x faster
-    velocity_factor = chart_config.hours_per_day / 8.0
     
     # Normalize completed work to 8-hour days
     normalized_completed_work = completed_work
@@ -51,9 +45,10 @@ def calculate_trend_line(valid_data: pd.DataFrame, chart_config: ChartConfig) ->
     velocity = normalized_completed_work / business_days_elapsed
     
     # No trend line function needed; we'll just plot a straight line
-    return None, velocity, None
+    return velocity
 
-def create_progress_chart(df: pd.DataFrame, scope_df: pd.DataFrame, chart_config: ChartConfig) -> go.Figure:
+def create_progress_chart(df: pd.DataFrame, scope_df: pd.DataFrame, chart_config: ChartConfig, 
+                          what_if_days: float = 0.0, velocity_multiplier: float = 1.0) -> go.Figure:
     """Create and return the progress chart using Plotly."""
     df['duedate'] = pd.to_datetime(df['duedate'])
     df_with_dates = df.dropna(subset=['duedate'])
@@ -73,8 +68,18 @@ def create_progress_chart(df: pd.DataFrame, scope_df: pd.DataFrame, chart_config
     
     # Calculate cumulative sum for the complete dataset
     complete_df['cumulative_sum'] = complete_df['originalestimate'].cumsum()
+
+    # Calculated actual completed and what_if completed
     completed_today = complete_df['cumulative_sum'].max()
+    what_if_completed = completed_today + what_if_days
     
+    # Create a modified cumulative_sum column that includes the "what if" value
+    complete_df['what_if_sum'] = complete_df['cumulative_sum']
+    
+     # Add the "what if" amount to today's value and all future values
+    today = datetime.now().date()
+    complete_df.loc[complete_df['duedate'].dt.date >= today, 'what_if_sum'] += what_if_days
+
     # Calculate completion metrics based on current scope
     today = datetime.now().date()
     today_scope = scope_df[scope_df['date'] <= today]['total_estimate'].iloc[-1]
@@ -133,28 +138,28 @@ def create_progress_chart(df: pd.DataFrame, scope_df: pd.DataFrame, chart_config
     
     # Calculate trend line
     valid_data = complete_df[complete_df['cumulative_sum'] > 0].copy()
-    trend_line, velocity, confidence_intervals = calculate_trend_line(valid_data, chart_config)
+
+    # Calculate velocity based on valid data
+    velocity = calculate_velocity(valid_data, chart_config.start_date)
     ideal_velocity = chart_config.hours_per_day / 8
-    
-    # Calculate projected completion date based on current trend
-    projected_completion_date = None
-    if trend_line is not None and velocity > 0:
-        # Calculate remaining work to be done
-        remaining_work = today_scope - completed_today
-        
-        # Calculate business days needed to complete the remaining work at current velocity
-        remaining_business_days = int(np.ceil(remaining_work / velocity))
-        
-        # Use numpy's busday_offset to add remaining business days to today
-        projected_completion_date = np.busday_offset(today, remaining_business_days, roll='forward')
-        # Convert numpy.datetime64 to datetime
-        projected_completion_date = pd.Timestamp(projected_completion_date).to_pydatetime().date()
+
+    # Calculate what-if velocity separately
+    what_if_velocity = None
+    if what_if_days > 0:
+        valid_data_copy = valid_data.copy()
+        last_date_idx = valid_data_copy['duedate'].dt.date.idxmax()
+        valid_data_copy.loc[last_date_idx, 'cumulative_sum'] += what_if_days
+        what_if_velocity = calculate_velocity(valid_data_copy, chart_config.start_date)
+
+    if what_if_velocity is not None:
+        what_if_velocity = what_if_velocity * velocity_multiplier
+    elif velocity_multiplier != 1.0:
+        what_if_velocity = velocity * velocity_multiplier
 
     # Create the Plotly figure
     fig = go.Figure()
     
     # Add traces in REVERSE order of desired legend appearance
-    # (Last added appears at the top of the legend)
     
     # Add today's expected progress point
     fig.add_trace(go.Scatter(
@@ -165,21 +170,6 @@ def create_progress_chart(df: pd.DataFrame, scope_df: pd.DataFrame, chart_config
         marker=dict(size=8, color='purple'),
         hovertemplate='%{y:.1f} days<extra></extra>'
     ))
-
-    # # Add pure completion date point
-    # fig.add_trace(go.Scatter(
-    #     x=[pure_completion_date],
-    #     y=[today_scope],
-    #     name=f'Pure completion ({pure_completion_date.strftime("%Y-%m-%d")})',
-    #     mode='markers',
-    #     marker=dict(
-    #         size=8, 
-    #         symbol='x',
-    #         showscale=False,
-    #         color=['green']  # First point transparent, second point purple
-    #     ),
-    #     hovertemplate='%{x} <extra></extra>'
-    # ))
     
     # Add scope line
     fig.add_trace(go.Scatter(
@@ -283,7 +273,34 @@ def create_progress_chart(df: pd.DataFrame, scope_df: pd.DataFrame, chart_config
             hovertemplate='Current velocity: %{text}<extra></extra>',
             text=[f"{velocity:.2f}/{ideal_velocity:.2f}"] * 2,
         ))
-    
+
+    # Add what-if velocity line if applicable
+    if what_if_velocity is not None and what_if_velocity > 0:
+        # Calculate projected completion date based on what-if velocity
+        remaining_work = today_scope - what_if_completed
+        remaining_business_days = int(np.ceil(remaining_work / what_if_velocity))
+        
+        # Use numpy's busday_offset to add remaining business days to today
+        what_if_completion_date = np.busday_offset(today, remaining_business_days, roll='forward')
+        what_if_completion_date = pd.Timestamp(what_if_completion_date).to_pydatetime().date()     
+
+        # Add what-if trend line from start to projected completion
+        fig.add_trace(go.Scatter(
+            x=[chart_config.start_date, what_if_completion_date],
+            y=[0, today_scope],
+            name=f'Simulation ({what_if_completion_date.strftime("%Y-%m-%d")})',
+            line=dict(color='deeppink', dash='dashdot', width=2),
+            mode='lines+markers',
+            marker=dict(
+                size=12, 
+                symbol='star',
+                showscale=False,
+                color=['rgba(0,0,0,0)', 'deeppink']  # First point transparent, second point purple
+            ),            
+            hovertemplate='Simluation: %{text}<extra></extra>',
+            text=[f"{what_if_completion_date.strftime("%Y-%m-%d")}"] * 2,
+        ))
+
     # Add completed work line
     fig.add_trace(go.Scatter(
         x=complete_df['duedate'].tolist(),
@@ -342,7 +359,6 @@ def create_state_time_chart(state_time_df: pd.DataFrame) -> go.Figure:
     if state_time_df.empty:
         return get_empty_figure()
     
-    # Get all state columns (excluding 'Issue')
     state_columns = [col for col in state_time_df.columns if col != 'Issue']
     
     # Calculate averages for each state
@@ -351,7 +367,6 @@ def create_state_time_chart(state_time_df: pd.DataFrame) -> go.Figure:
     # Calculate thresholds (2x the average)
     state_thresholds = {state: avg * 2 for state, avg in state_averages.items()}
     
-    # Create figure
     fig = go.Figure()
     
     # Create lists to collect all data points by category
@@ -366,7 +381,7 @@ def create_state_time_chart(state_time_df: pd.DataFrame) -> go.Figure:
     avg_x = []
     avg_y = []
     
-    # Process all states at once
+    # Process all states
     for state in state_columns:
         # Find which points are above threshold
         above_threshold = state_time_df[state] > state_thresholds[state]
@@ -391,7 +406,7 @@ def create_state_time_chart(state_time_df: pd.DataFrame) -> go.Figure:
             avg_x.append(state)
             avg_y.append(state_averages[state])
     
-    # Add all normal points as a single trace
+    # Add normal points
     if normal_x:
         fig.add_trace(go.Scatter(
             x=normal_x,
@@ -407,7 +422,7 @@ def create_state_time_chart(state_time_df: pd.DataFrame) -> go.Figure:
             hovertemplate='%{text}: %{y:.2f} days<extra></extra>'
         ))
     
-    # Add all outlier points as a single trace
+    # Add outlier points
     if outlier_x:
         fig.add_trace(go.Scatter(
             x=outlier_x,
@@ -424,13 +439,13 @@ def create_state_time_chart(state_time_df: pd.DataFrame) -> go.Figure:
             hovertemplate='%{text}: %{y:.2f} days<extra></extra>'
         ))
     
-    # Add all average markers as a single trace
+    # Add average markers
     if avg_x:
         fig.add_trace(go.Scatter(
             x=avg_x,
             y=avg_y,
             mode='markers',
-            marker=dict(size=10, symbol='diamond', color='blue'),
+            marker=dict(size=15, symbol='line-ew', color='blue', line=dict(width=2,color='blue')),
             name='Averages',
             hovertemplate='Average: %{y:.2f} days<extra></extra>'
         ))
@@ -454,6 +469,82 @@ def create_state_time_chart(state_time_df: pd.DataFrame) -> go.Figure:
             bordercolor="lightgray",
             borderwidth=1
         )
+    )
+    
+    return fig
+
+def create_state_time_boxplot(state_time_df: pd.DataFrame) -> go.Figure:
+    """Create a box plot showing distribution of time spent in each state for all issues."""
+    if state_time_df.empty:
+        return get_empty_figure()
+
+# Define the desired state order
+    state_order = [
+        'In Progress', 
+        'In Review', 
+        'In PO Review', 
+        'Blocked', 
+    ]
+
+    state_columns = [state for state in state_order if state in state_time_df.columns]
+
+    # Create a long-format DataFrame using melt
+    melted_df = pd.melt(
+        state_time_df, 
+        id_vars=['Issue'],
+        value_vars=state_columns,
+        var_name='State', 
+        value_name='Days',
+    )
+    
+    # Remove rows with NaN values
+    melted_df = melted_df.dropna(subset=['Days'])
+    
+    fig = go.Figure()
+
+    
+    # # Create box plots for each state
+    for state in state_columns:
+        state_data = melted_df[melted_df['State'] == state] 
+
+        fig.add_trace(go.Box(
+            y=state_data['Days'],
+            name=state,
+            boxpoints='all',  # Show outliers as individual points
+            #jitter=0.3,            # Add jitter to points for better visibility
+            #pointpos=-1.8,         # Position points to the left of the box
+            marker=dict(
+                color='rgba(0,0,255,0.5)',
+                size=5,
+                line=dict(width=1, color='black')
+            ),
+            line=dict(color='blue'),
+            fillcolor='rgba(0,0,255,0.1)',
+            hoverinfo='y+name',
+            hovertemplate='%{y:.2f} days<extra></extra>'
+        ))    
+
+    # Update layout
+    fig.update_layout(
+        title='Distribution of Time Spent in Each State',
+        xaxis_title='',
+        yaxis_title='Days',
+        hovermode='closest',
+        height=600,
+        # xaxis=dict(
+        #     type='category',
+        #     # categoryorder='array',
+        #     # categoryarray=state_columns
+        # ),
+        plot_bgcolor='white',
+        boxmode='overlay'
+    )
+    
+    # Add grid lines for better readability
+    fig.update_yaxes(
+        gridcolor='rgba(128,128,128,0.3)',
+        zeroline=True,
+        zerolinecolor='rgba(128,128,128,0.5)'
     )
     
     return fig
