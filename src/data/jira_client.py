@@ -253,7 +253,9 @@ class CompletedWorkProcessor:
         workingTime = []
         for index, changes in statusChanges.items():
             changes.sort_values(by='created', ascending=True, inplace=True)
-            changes['duration'] = (changes['created'] - changes['created'].shift()).fillna(0)
+            # Fix the warning by explicitly specifying the dtype
+            duration = (changes['created'] - changes['created'].shift())
+            changes['duration'] = duration.fillna(pd.Timedelta(seconds=0))
             timeSpentWorking = 0.0
             
             for _, row in changes.iterrows():
