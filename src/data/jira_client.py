@@ -6,6 +6,7 @@ import pandas as pd
 from jira import JIRA
 from src.config.jira_config import JiraConfig
 from src.config.chart_config import ChartConfig
+import logging
 
 
 class JiraIssueData(NamedTuple):
@@ -43,7 +44,7 @@ class EstimateProcessor:
     """Processes estimate changes from JIRA issues."""
     
     @staticmethod
-    def process_estimate_changes(issues: List, chart_config: ChartConfig) -> Tuple[Dict, Dict]:
+    def process_estimate_changes(issues: List, chart_config: ChartConfig) -> Tuple[Dict]:
         """Process estimate changes from issue changelogs.
         
         Args:
@@ -56,7 +57,6 @@ class EstimateProcessor:
                 - Dictionary of current estimates
         """
         estimate_changes: Dict = {}
-        current_estimates: Dict = {}
         
         # Initialize the estimate changes dict with an empty dict for start date
         start_date = chart_config.start_date.date()
@@ -66,7 +66,6 @@ class EstimateProcessor:
         for issue in issues:
             # Get the current estimate from the issue's current state
             current_estimate = issue.fields.timeoriginalestimate / (3600 * 8) if issue.fields.timeoriginalestimate else 0
-            current_estimates[issue.key] = current_estimate
             
             # Check if the issue existed before the start date (created date)
             issue_created = pd.to_datetime(issue.fields.created).date()
@@ -122,19 +121,11 @@ class EstimateProcessor:
                     estimate_changes[change_date] = {}
                 estimate_changes[change_date][issue.key] = new_estimate
         
-        return estimate_changes, current_estimates
+        return estimate_changes
     
     @staticmethod
     def create_scope_dataframe(estimate_changes: Dict, chart_config: ChartConfig) -> pd.DataFrame:
-        """Create DataFrame with all estimate changes.
-        
-        Args:
-            estimate_changes: Dictionary of estimate changes by date
-            chart_config: Chart configuration with start/end dates
-            
-        Returns:
-            DataFrame with scope changes over time
-        """
+        """Create DataFrame with all estimate changes."""
         scope_data = []
         running_estimates = {}
         sorted_dates = sorted(estimate_changes.keys())
@@ -147,17 +138,15 @@ class EstimateProcessor:
             # Update running estimates with any changes for this date
             if date != sorted_dates[0]:  # Skip first date as we've already initialized with it
                 for issue_key, new_estimate in estimate_changes[date].items():
+                    old_estimate = running_estimates.get(issue_key, 0)
                     running_estimates[issue_key] = new_estimate
-            
             total = sum(running_estimates.values())
-            
             scope_data.append({
                 'date': date,
                 'total_estimate': total
             })
         
         scope_df = pd.DataFrame(scope_data).sort_values('date')
-        
         # Create complete dataset with all dates
         date_range = pd.date_range(start=chart_config.start_date.date(), 
                                   end=chart_config.end_date.date(), 
@@ -404,7 +393,7 @@ def get_jira_data(jira_config: JiraConfig, chart_config: ChartConfig) -> Tuple[p
     issues = jira_client.get_issues(chart_config.jira_query)
     
     # Process estimate changes
-    estimate_changes, _ = EstimateProcessor.process_estimate_changes(issues, chart_config)
+    estimate_changes = EstimateProcessor.process_estimate_changes(issues, chart_config)
     scope_df = EstimateProcessor.create_scope_dataframe(estimate_changes, chart_config)
 
     # Process completed work

@@ -23,9 +23,16 @@ def setup_logging(log_level: str = "INFO") -> None:
         '%(asctime)s | %(levelname)-8s | %(name)s | %(message)s'
     )
     console_formatter = logging.Formatter(
-        '%(levelname)-8s | %(message)s'
+        '%(levelname)s | %(name)s | %(message)s'
     )
     
+    # Get root logger and remove any existing handlers
+    root_logger = logging.getLogger()
+    root_logger.handlers.clear()  # Clear existing handlers
+    
+    # Set base logging level
+    root_logger.setLevel(logging.DEBUG)
+
     # Create and configure file handler
     file_handler = logging.handlers.RotatingFileHandler(
         log_file,
@@ -40,8 +47,5 @@ def setup_logging(log_level: str = "INFO") -> None:
     console_handler.setFormatter(console_formatter)
     console_handler.setLevel(getattr(logging, log_level.upper()))
     
-    # Configure root logger
-    root_logger = logging.getLogger()
-    root_logger.setLevel(logging.DEBUG)  # Capture all logs
     #root_logger.addHandler(file_handler)
     root_logger.addHandler(console_handler)
