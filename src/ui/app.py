@@ -6,7 +6,7 @@ from src.config.jira_config import JiraConfig
 from src.config.chart_config import ChartConfig
 from src.core.data_service import DataService, ProjectData, SimulationParams
 from src.ui.state_management import StreamlitUIState
-from src.visualization.charts import create_progress_chart, create_state_time_boxplot
+from src.visualization.charts import create_progress_chart, create_state_time_boxplot, create_state_time_chart
 from src.visualization.tables import create_tables, create_state_time_dataframe
 
 
@@ -291,9 +291,15 @@ def display_issue_analysis(project_data: ProjectData):
     - Red points indicate issues that took more than twice the average time
     """)
     
-    # Add state time chart and table
-    state_time_chart = create_state_time_boxplot(project_data.state_time_df)
-    st.plotly_chart(state_time_chart, use_container_width=False)
+    col1, col2 = st.columns(2)
+
+    with col1:
+        # Add state time chart and table
+        state_time_boxplot = create_state_time_boxplot(project_data.state_time_df)
+        st.plotly_chart(state_time_boxplot)
+    with col2:
+        state_time_chart = create_state_time_chart(project_data.state_time_df)
+        st.plotly_chart(state_time_chart)
     
     # Add state time table
     state_time_table_df = create_state_time_dataframe(project_data.state_time_df)

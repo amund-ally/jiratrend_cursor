@@ -426,8 +426,16 @@ def create_state_time_chart(state_time_df: pd.DataFrame) -> go.Figure:
     """Create a chart showing time spent in each state for all issues."""
     if state_time_df.empty:
         return get_empty_figure()
+
+   # Define the desired state order
+    state_order = [
+        'In Progress', 
+        'In Review', 
+        'In PO Review', 
+        'Blocked', 
+    ]
     
-    state_columns = [col for col in state_time_df.columns if col != 'Issue']
+    state_columns = [state for state in state_order if state in state_time_df.columns]
     
     # Calculate averages for each state
     state_averages = {state: state_time_df[state].mean() for state in state_columns}
