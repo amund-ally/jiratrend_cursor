@@ -3,20 +3,47 @@ import pandas as pd
 import datetime as datetime
 import numpy as np
 import plotly.graph_objects as go
+import logging
 
-Table_Figures = namedtuple('Tables', ['completed', 'stats'])
+# Update the namedtuple to hold DataFrames instead of figures
+Table_Data = namedtuple('TableData', ['completed_df', 'stats_df', 'completed_fig', 'stats_fig'])
 
-def create_tables(completed_df: pd.DataFrame) -> Table_Figures:
-   # Filter for completed issues with both estimate and actual time
-   filtered_df = completed_df[completed_df['duedate'].notna()][['key', 'duedate', 'originalestimate', 'timespentworking']].copy()
-   filtered_df.columns = ['Issue', 'Due Date', 'Est Time', 'Actual Time']
-
-   metrics = calculate_estimate_accuracy_metrics(filtered_df)
-
-   stats_fig = create_stats_table(metrics)
-   completed_fig = create_completed_table(filtered_df)
-   return Table_Figures(completed=completed_fig, stats=stats_fig)
+def create_tables(completed_df: pd.DataFrame) -> Table_Data:
+    """Create tables showing completed issues and statistical analysis.
     
+    Args:
+        completed_df: DataFrame with completed work data
+        
+    Returns:
+        Table_Data: Namedtuple containing both dataframes and plotly figures
+    """
+    logger = logging.getLogger(__name__)
+    logger.debug(f"Creating tables from completed_df with {len(completed_df)} rows")
+    
+    # Filter for completed issues with both estimate and actual time
+    filtered_df = completed_df[completed_df['duedate'].notna()][['key', 'duedate', 'originalestimate', 'timespentworking']].copy()
+    filtered_df.columns = ['Issue', 'Due Date', 'Est Time', 'Actual Time']
+    logger.debug(f"Filtered to {len(filtered_df)} rows with completed work")
+
+    # Calculate metrics
+    metrics = calculate_estimate_accuracy_metrics(filtered_df)
+    logger.debug(f"Calculated metrics: mean error={metrics['mean_error']:.2f}, est_mean={metrics['est_mean']:.2f}")
+
+    # Create stats dataframe
+    stats_df = create_stats_dataframe(metrics)
+    logger.debug(f"Created stats dataframe with {len(stats_df)} rows")
+
+    # Create completed work dataframe
+    completed_df = create_completed_dataframe(filtered_df)
+    logger.debug(f"Created completed dataframe with {len(completed_df)} rows")
+    
+    # For backward compatibility, also create the figures
+    stats_fig = create_stats_table(metrics)
+    completed_fig = create_completed_table(filtered_df)
+    
+    return Table_Data(completed_df=completed_df, stats_df=stats_df, 
+                      completed_fig=completed_fig, stats_fig=stats_fig)
+
 def calculate_estimate_accuracy_metrics(filtered_df: pd.DataFrame) -> dict:
     """Calculate various metrics to analyze estimate accuracy."""
     metrics = {}
@@ -42,6 +69,73 @@ def calculate_estimate_accuracy_metrics(filtered_df: pd.DataFrame) -> dict:
     
     return metrics
 
+def create_stats_dataframe(metrics: dict) -> pd.DataFrame:
+    """Create a DataFrame showing statistical analysis of estimates."""
+    
+    stats_df = pd.DataFrame([
+        {
+            'Metric': 'Mean',
+            'Estimates': metrics["est_mean"],
+            'Actual': metrics["actual_mean"],
+            'Interpretation': f'On average, tasks are estimated at {metrics["est_mean"]:.1f} days and take {metrics["actual_mean"]:.1f} days'
+        },
+        {
+            'Metric': 'Standard Deviation',
+            'Estimates': metrics["est_std"],
+            'Actual': metrics["actual_std"],
+            'Interpretation': f'Estimates vary by ±{metrics["est_std"]:.1f} days, actual time varies by ±{metrics["actual_std"]:.1f} days'
+        },
+        {
+            'Metric': 'Error (Act-Est)',
+            'Estimates': metrics["mean_error"],
+            'Actual': metrics["error_std"],
+            'Interpretation': f'{"Underestimated" if metrics["mean_error"] > 0 else "Overestimated"} by {abs(metrics["mean_error"]):.1f} days on average'
+        },
+        {
+            'Metric': 'Coefficient of Variation',
+            'Estimates': metrics["est_cv"],
+            'Actual': metrics["actual_cv"],
+            'Interpretation': f'{"Estimates" if metrics["est_cv"] > metrics["actual_cv"] else "Actual time"} shows more variation relative to mean'
+        },
+        {
+            'Metric': 'Accuracy',
+            'Estimates': metrics["percent_within_1_std"],
+            'Actual': None,
+            'Interpretation': f'{metrics["percent_within_1_std"]:.1f}% of estimates were within ±{metrics["error_std"]:.1f} days of actual time'
+        }
+    ])
+    
+    return stats_df
+
+def create_completed_dataframe(filtered_df: pd.DataFrame) -> pd.DataFrame:
+    """Create a DataFrame showing completed issues with relevant metrics."""
+    
+    # Sort by completion date (descending)
+    sorted_df = filtered_df.sort_values(by='Due Date', ascending=False).copy()
+
+    # Add a column showing business days between completion dates
+    # Create a shifted series for the previous date (next row's date)
+    previous_dates = pd.to_datetime(sorted_df['Due Date'].shift(-1)).dt.date
+    due_dates = pd.to_datetime(sorted_df['Due Date']).dt.date
+    
+    # Calculate business days between each row and the next
+    days_between = []
+    for current, previous in zip(due_dates, previous_dates):
+        if pd.isna(previous):
+            days_between.append(None)  # Last row has no "next" date
+        else:
+            days_between.append(np.busday_count(previous, current))
+    sorted_df['Days Since Previous'] = days_between
+    
+    # Create an Issue URL column for display
+    sorted_df['Issue URL'] = sorted_df['Issue'].apply(
+        lambda x: f"https://agrium.atlassian.net/browse/{x}"
+    )
+    
+    # Reorder columns to match desired display order
+    result_df = sorted_df[['Issue', 'Issue URL', 'Due Date', 'Days Since Previous', 'Est Time', 'Actual Time']]
+    
+    return result_df
 
 def create_stats_table(metrics: dict) -> go.Figure:
     """Create a table showing statistical analysis of estimates."""
@@ -113,7 +207,6 @@ def create_stats_table(metrics: dict) -> go.Figure:
     )
 
     return fig
-
 
 def create_completed_table(filtered_df: pd.DataFrame) -> go.Figure:
     """Create tables showing completed issues and statistical analysis."""    

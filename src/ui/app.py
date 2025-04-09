@@ -266,12 +266,72 @@ def display_burnup_chart(project_data: ProjectData, chart_config: ChartConfig, s
     
     # Create and display tables
     tables = create_tables(project_data.completed_df)
-    st.plotly_chart(tables.completed, use_container_width=True)
-    st.plotly_chart(tables.stats, use_container_width=True)
     
-    # Add collapsible metrics explanation
-    with st.expander("📊 Understanding the Metrics", expanded=False):
-        st.markdown(get_metrics_explanation())
+    table1, table2= st.tabs(["Completed Issues", "Estimation Analysis"])
+
+    with table1:
+        # Display completed issues table using dataframe
+        st.dataframe(
+            tables.completed_df,
+            column_config={
+                "Issue": None,
+                "Issue URL": st.column_config.LinkColumn(
+                    "Issue",
+                    help="Click to open in Jira",
+                    display_text=r"https:\/\/agrium\.atlassian\.net\/browse\/(.*)"
+                ),
+                "Due Date": st.column_config.DateColumn(
+                    "Date Completed",
+                    format="YYYY-MM-DD"
+                ),
+                "Days Since Previous": st.column_config.NumberColumn(
+                    "τ Passed",
+                    help="Business days since the previous completed issue",
+                    format="%d"
+                ),
+                "Est Time": st.column_config.NumberColumn(
+                    "Estimate (days)",
+                    format="%.2f"
+                ),
+                "Actual Time": st.column_config.NumberColumn(
+                    "Actual (days)",
+                    format="%.2f"
+                )
+            },
+            use_container_width=True,
+            hide_index=True,
+        )
+    with table2:
+        # Display stats table using dataframe
+        st.dataframe(
+            tables.stats_df,
+            column_config={
+                "Metric": st.column_config.TextColumn(
+                    "Metric",
+                    width="medium"
+                ),
+                "Estimates": st.column_config.NumberColumn(
+                    "Estimates",
+                    help="Statistics for original estimates",
+                    format="%.2f"
+                ),
+                "Actual": st.column_config.NumberColumn(
+                    "Actual",
+                    help="Statistics for actual time",
+                    format="%.2f"
+                ),
+                "Interpretation": st.column_config.TextColumn(
+                    "Interpretation",
+                    help="What the metrics mean"
+                )
+            },
+            use_container_width=True,
+            hide_index=True,
+        )
+        
+        # Add collapsible metrics explanation
+        with st.expander("📊 Understanding the Metrics", expanded=False):
+            st.markdown(get_metrics_explanation())
 
 
 def display_issue_analysis(project_data: ProjectData):
