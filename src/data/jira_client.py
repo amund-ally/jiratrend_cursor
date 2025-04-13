@@ -44,7 +44,7 @@ class EstimateProcessor:
     """Processes estimate changes from JIRA issues."""
     
     @staticmethod
-    def process_estimate_changes(issues: List, chart_config: ChartConfig) -> Tuple[Dict]:
+    def process_estimate_changes(issues: List, chart_config: ChartConfig) -> Dict:
         """Process estimate changes from issue changelogs.
         
         Args:
@@ -126,34 +126,60 @@ class EstimateProcessor:
     @staticmethod
     def create_scope_dataframe(estimate_changes: Dict, chart_config: ChartConfig) -> pd.DataFrame:
         """Create DataFrame with all estimate changes."""
+        logger = logging.getLogger(__name__)
+        
+        logger.debug(f"Starting create_scope_dataframe with {len(estimate_changes)} change dates")
+        logger.debug(f"Date range: {chart_config.start_date.date()} to {chart_config.end_date.date()}")
+        
         scope_data = []
         running_estimates = {}
         sorted_dates = sorted(estimate_changes.keys())
         
+        logger.debug(f"Sorted dates range: {sorted_dates[0]} to {sorted_dates[-1]}" if sorted_dates else "No dates found")
+        
         # Initialize with the first date's estimates
         if sorted_dates:
             running_estimates = estimate_changes[sorted_dates[0]].copy()
+            logger.debug(f"Initial estimates on {sorted_dates[0]}: {len(running_estimates)} issues, "
+                        f"total estimate: {sum(running_estimates.values()):.2f} days")
         
         for date in sorted_dates:
             # Update running estimates with any changes for this date
             if date != sorted_dates[0]:  # Skip first date as we've already initialized with it
+                changes_count = len(estimate_changes[date])
+                if changes_count > 0:
+                    logger.debug(f"Processing {changes_count} estimate changes for {date}")
+                    logger.debug(f"Changes: {estimate_changes[date]}")
+                    
                 for issue_key, new_estimate in estimate_changes[date].items():
                     old_estimate = running_estimates.get(issue_key, 0)
                     running_estimates[issue_key] = new_estimate
+                    logger.debug(f"Issue {issue_key} estimate changed: {old_estimate:.2f} -> {new_estimate:.2f}")
+            
             total = sum(running_estimates.values())
+            logger.debug(f"Total estimate for {date}: {total:.2f} days")
+            
             scope_data.append({
                 'date': date,
                 'total_estimate': total
             })
         
         scope_df = pd.DataFrame(scope_data).sort_values('date')
+        logger.debug(f"Created initial scope_df with {len(scope_df)} rows")
+        
         # Create complete dataset with all dates
         date_range = pd.date_range(start=chart_config.start_date.date(), 
                                   end=chart_config.end_date.date(), 
                                   freq='D').date
+        logger.debug(f"Creating complete date range with {len(date_range)} days")
+        
         complete_scope_df = pd.DataFrame({'date': date_range})
         complete_scope_df = complete_scope_df.merge(scope_df, on='date', how='left')
         complete_scope_df['total_estimate'] = complete_scope_df['total_estimate'].ffill()
+        
+        logger.debug(f"Final complete_scope_df: {len(complete_scope_df)} rows")
+        logger.debug(f"First row: {complete_scope_df.iloc[0].to_dict()}")
+        logger.debug(f"Last row: {complete_scope_df.iloc[-1].to_dict()}")
         
         return complete_scope_df
 
@@ -373,7 +399,7 @@ class StateTimeProcessor:
         return state_time_df
 
 
-def get_jira_data(jira_config: JiraConfig, chart_config: ChartConfig) -> Tuple[pd.DataFrame, pd.DataFrame, pd.DataFrame]:
+def get_jira_data(jira_config: JiraConfig, chart_config: ChartConfig) -> Tuple[pd.DataFrame, pd.DataFrame, pd.DataFrame, Dict]:
     """Fetch and process JIRA data.
     
     Args:
@@ -385,22 +411,38 @@ def get_jira_data(jira_config: JiraConfig, chart_config: ChartConfig) -> Tuple[p
             - DataFrame with completed work data
             - DataFrame with scope changes data
             - DataFrame with state time analysis data
+            - Dictionary with raw estimate changes
     """
-    # Initialize JIRA client
-    jira_client = JiraClient(jira_config)
+    logger = logging.getLogger(__name__)
+    logger.info("Starting JIRA data retrieval and processing")
     
-    # Fetch issues from JIRA
-    issues = jira_client.get_issues(chart_config.jira_query)
-    
-    # Process estimate changes
-    estimate_changes = EstimateProcessor.process_estimate_changes(issues, chart_config)
-    scope_df = EstimateProcessor.create_scope_dataframe(estimate_changes, chart_config)
+    try:
+        # Initialize JIRA client
+        jira_client = JiraClient(jira_config)
+        
+        # Fetch issues from JIRA
+        issues = jira_client.get_issues(chart_config.jira_query)
+        
+        # Process estimate changes
+        logger.debug("Processing estimate changes")
+        estimate_changes = EstimateProcessor.process_estimate_changes(issues, chart_config)
+        scope_df = EstimateProcessor.create_scope_dataframe(estimate_changes, chart_config)
+        logger.debug(f"Created scope dataframe with {len(scope_df)} rows")
 
-    # Process completed work
-    actual_completed_df = CompletedWorkProcessor.get_actual_completion_data(issues)
-    completed_df = CompletedWorkProcessor.get_completed_work_data(issues, actual_completed_df)
+        # Process completed work
+        logger.debug("Processing completed work")
+        actual_completed_df = CompletedWorkProcessor.get_actual_completion_data(issues)
+        completed_df = CompletedWorkProcessor.get_completed_work_data(issues, actual_completed_df)
+        logger.debug(f"Created completed work dataframe with {len(completed_df)} rows")
 
-    # Get state time analysis data
-    state_time_df = StateTimeProcessor.get_state_time_analysis(issues)
+        # Get state time analysis data
+        logger.debug("Processing state time analysis")
+        state_time_df = StateTimeProcessor.get_state_time_analysis(issues)
+        logger.debug(f"Created state time dataframe with {len(state_time_df)} rows")
 
-    return completed_df, scope_df, state_time_df
+        logger.info("Successfully processed all JIRA data")
+        return completed_df, scope_df, state_time_df, estimate_changes
+        
+    except Exception as e:
+        logger.error(f"Failed to process JIRA data: {str(e)}", exc_info=True)
+        raise

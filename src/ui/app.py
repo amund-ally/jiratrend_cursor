@@ -194,7 +194,7 @@ def display_metrics(metrics: dict, simulation: SimulationParams):
         metrics: Dictionary of calculated metrics
         simulation: Current simulation parameters
     """
-    col1, col2, col3, col4 = st.columns(4)
+    col1, col2, col3, col4, col5, col6 = st.columns(6)  # Six columns
 
     with col1:
         st.metric(
@@ -235,6 +235,53 @@ def display_metrics(metrics: dict, simulation: SimulationParams):
             f"{metrics['days_since_last_completed']} days",
             help="Weekdays since the last completed issue"
         )
+        
+    with col5:
+        # Calculate days off from ideal date
+        days_off = metrics['days_off']
+        # Format the value and determine color
+        if days_off == 0:
+            value = "On track"
+            delta = "0 weekdays"
+        elif days_off < 0:
+            value = f"Early"
+            delta = f"{days_off} weekdays"
+        else:
+            value = f"Late"
+            delta = f"-{days_off} weekdays"
+        
+        st.metric(
+            "Schedule Variance",
+            value,
+            delta=delta,
+            help="Weekdays off from ideal completion date"
+        )
+        
+    with col6:
+        # Calculate required hours per day
+        required_hours = metrics.get('required_hours_per_day', 0)
+        configured_hours = metrics.get('configured_hours_per_day', 8.0)
+        
+        # Calculate delta (positive when configured > required, negative when required > configured)
+        delta = configured_hours - required_hours
+        
+        # Format strings
+        if delta > 0:
+            delta_str = f"+{delta:.1f} hours"
+            help_text = f"Current pace is ahead of schedule. Could reduce to {required_hours:.1f} hours/day."
+        elif delta < 0:
+            delta_str = f"{delta:.1f} hours"
+            help_text = f"Need to increase from {configured_hours:.1f} to {required_hours:.1f} hours/day to meet ideal date."
+        else:
+            delta_str = "0.0 hours"
+            help_text = "Current pace exactly matches what's needed for the ideal completion date."
+        
+        st.metric(
+            "Required Hours/Day",
+            f"{required_hours:.1f} hours",
+            delta=delta_str,
+            help=help_text
+        )
 
 
 def display_burnup_chart(project_data: ProjectData, chart_config: ChartConfig, simulation: SimulationParams):
@@ -251,7 +298,7 @@ def display_burnup_chart(project_data: ProjectData, chart_config: ChartConfig, s
         simulation = create_simulation_form()
     
     # Create burnup chart
-    fig = create_progress_chart(
+    fig, computed_values = create_progress_chart(
         project_data.completed_df, 
         project_data.scope_df, 
         chart_config, 
@@ -261,15 +308,16 @@ def display_burnup_chart(project_data: ProjectData, chart_config: ChartConfig, s
     st.plotly_chart(fig, use_container_width=True)
     
     # Calculate and display metrics
-    metrics = DataService.calculate_metrics(project_data, simulation)
+    metrics = DataService.calculate_metrics(project_data, computed_values, simulation)
     display_metrics(metrics, simulation)
     
     # Create and display tables
-    tables = create_tables(project_data.completed_df)
+    tables = create_tables(project_data.completed_df, project_data.estimate_changes, chart_config.start_date)
     
-    table1, table2= st.tabs(["Completed Issues", "Estimation Analysis"])
-
-    with table1:
+    # Create tabs for the different tables
+    tab1, tab2, tab3 = st.tabs(["Completed Issues", "Scope Changes", "Estimation Analysis"])
+    
+    with tab1:
         # Display completed issues table using dataframe
         st.dataframe(
             tables.completed_df,
@@ -301,7 +349,40 @@ def display_burnup_chart(project_data: ProjectData, chart_config: ChartConfig, s
             use_container_width=True,
             hide_index=True,
         )
-    with table2:
+        
+    with tab2:
+        # Display scope changes table
+        st.dataframe(
+            tables.scope_changes_df,
+            column_config={
+                "Issue": None,
+                "Issue URL": st.column_config.LinkColumn(
+                    "Issue",
+                    help="Click to open in Jira",
+                    display_text=r"https:\/\/agrium\.atlassian\.net\/browse\/(.*)"
+                ),
+                "Date": st.column_config.DateColumn(
+                    "Date Changed",
+                    format="YYYY-MM-DD"
+                ),
+                "Original Estimate": st.column_config.NumberColumn(
+                    "Original (days)",
+                    format="%.2f"
+                ),
+                "New Estimate": st.column_config.NumberColumn(
+                    "New (days)",
+                    format="%.2f"
+                ),
+                "Change": st.column_config.NumberColumn(
+                    "Change (days)",
+                    help="pos indicates scope increase, neg indicates scope decrease",
+                )
+            },
+            use_container_width=True,
+            hide_index=True,
+        )
+    
+    with tab3:
         # Display stats table using dataframe
         st.dataframe(
             tables.stats_df,
@@ -328,7 +409,7 @@ def display_burnup_chart(project_data: ProjectData, chart_config: ChartConfig, s
             use_container_width=True,
             hide_index=True,
         )
-        
+    
         # Add collapsible metrics explanation
         with st.expander("📊 Understanding the Metrics", expanded=False):
             st.markdown(get_metrics_explanation())

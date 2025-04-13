@@ -1,21 +1,85 @@
 from collections import namedtuple
+from typing import Dict
 import pandas as pd
 import datetime as datetime
 import numpy as np
 import plotly.graph_objects as go
 import logging
 
-# Update the namedtuple to hold DataFrames instead of figures
-Table_Data = namedtuple('TableData', ['completed_df', 'stats_df', 'completed_fig', 'stats_fig'])
+# Update the namedtuple to hold the scope changes DataFrame
+Table_Data = namedtuple('TableData', ['completed_df', 'stats_df', 'scope_changes_df', 'completed_fig', 'stats_fig'])
 
-def create_tables(completed_df: pd.DataFrame) -> Table_Data:
+def create_scope_changes_dataframe(estimate_changes: Dict, start_date: datetime.datetime) -> pd.DataFrame:
+    """Create a DataFrame showing all estimate changes.
+    
+    Args:
+        estimate_changes: Dictionary mapping dates to dictionaries of issue key -> estimate
+        
+    Returns:
+        DataFrame with scope change details
+    """
+    logger = logging.getLogger(__name__)
+    logger.debug(f"Creating scope changes dataframe from {len(estimate_changes)} date entries")
+    
+    # Parse the raw estimate changes into a flat list
+    scope_changes = []
+    sorted_dates = sorted(estimate_changes.keys())
+    sorted_dates = [date for date in sorted_dates if date > start_date.date()]
+
+    # Track previous estimates for calculating change
+    previous_estimates = {}
+    
+    for date in sorted_dates:
+        for issue_key, new_estimate in estimate_changes[date].items():
+            old_estimate = previous_estimates.get(issue_key, 0)
+            
+            # Only include changes, not initial values from start date
+            # unless there's a real change in value
+            is_first_date = date == sorted_dates[0]
+            if not is_first_date or (is_first_date and new_estimate != 0):
+                scope_changes.append({
+                    'Date': date,
+                    'Issue': issue_key,
+                    'Original Estimate': old_estimate,
+                    'New Estimate': new_estimate,
+                    'Change': new_estimate - old_estimate
+                })
+            
+            # Update tracking of previous estimates
+            previous_estimates[issue_key] = new_estimate
+    
+    # Create DataFrame
+    if not scope_changes:
+        logger.warning("No scope changes found to display")
+        return pd.DataFrame()
+    
+    df = pd.DataFrame(scope_changes)
+    
+    # Sort by date (descending) and then by absolute change magnitude (descending)
+    df['abs_change'] = df['Change'].abs()
+    df = df.sort_values(['Date', 'abs_change'], ascending=[False, False])
+    df = df.drop(columns=['abs_change'])
+    
+    # Add URL column for display
+    df['Issue URL'] = df['Issue'].apply(
+        lambda x: f"https://agrium.atlassian.net/browse/{x}"
+    )
+
+    # Reorder columns
+    result_df = df[['Issue', 'Issue URL',  'Date', 'Original Estimate', 'New Estimate', 'Change']]
+    
+    logger.debug(f"Created scope changes dataframe with {len(result_df)} rows")
+    return result_df
+
+def create_tables(completed_df: pd.DataFrame, estimate_changes: Dict, start_date: datetime) -> Table_Data:
     """Create tables showing completed issues and statistical analysis.
     
     Args:
         completed_df: DataFrame with completed work data
+        estimate_changes: Dictionary of raw estimate changes by date
         
     Returns:
-        Table_Data: Namedtuple containing both dataframes and plotly figures
+        Table_Data: Namedtuple containing dataframes and plotly figures
     """
     logger = logging.getLogger(__name__)
     logger.debug(f"Creating tables from completed_df with {len(completed_df)} rows")
@@ -37,12 +101,23 @@ def create_tables(completed_df: pd.DataFrame) -> Table_Data:
     completed_df = create_completed_dataframe(filtered_df)
     logger.debug(f"Created completed dataframe with {len(completed_df)} rows")
     
+    # Create scope changes dataframe if estimate changes are provided
+    scope_changes_df = None
+    if estimate_changes:
+        scope_changes_df = create_scope_changes_dataframe(estimate_changes, start_date)
+        logger.debug(f"Created scope changes dataframe with {len(scope_changes_df)} rows")
+    
     # For backward compatibility, also create the figures
     stats_fig = create_stats_table(metrics)
     completed_fig = create_completed_table(filtered_df)
     
-    return Table_Data(completed_df=completed_df, stats_df=stats_df, 
-                      completed_fig=completed_fig, stats_fig=stats_fig)
+    return Table_Data(
+        completed_df=completed_df, 
+        stats_df=stats_df, 
+        scope_changes_df=scope_changes_df,
+        completed_fig=completed_fig, 
+        stats_fig=stats_fig
+    )
 
 def calculate_estimate_accuracy_metrics(filtered_df: pd.DataFrame) -> dict:
     """Calculate various metrics to analyze estimate accuracy."""

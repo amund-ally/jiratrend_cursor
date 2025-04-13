@@ -222,8 +222,8 @@ class ChartBuilder:
             y=[0, today_scope],
             mode='lines',
             line=dict(width=0, color='rgba(0,0,0,0)'),
+            hoverinfo='skip',
             showlegend=False,
-            hoverinfo='skip'
         ))
         
         fig.add_trace(go.Scatter(
@@ -235,22 +235,8 @@ class ChartBuilder:
             fillcolor='rgba(255,165,0,0.1)',
             name='Velocity Range (±20%)',
             hovertemplate='Optimistic: %{text[0]}<br>Pessimistic: %{text[1]}<extra></extra>',
-            text=[[optimistic_completion.strftime('%Y-%m-%d'), pessimistic_completion.strftime('%Y-%m-%d')]] * 2
-        ))
-        
-        # Add marker at the projected completion point
-        fig.add_trace(go.Scatter(
-            x=[projected_completion_date],
-            y=[today_scope],
-            name=f'Projected Completion ({projected_completion_date.strftime("%Y-%m-%d")})',
-            mode='markers',
-            marker=dict(
-                size=12,
-                symbol='star',
-                color='orange',
-                line=dict(color='black', width=1)
-            ),
-            hovertemplate='Projected completion date: %{x}<br>%{y:.1f} days<extra></extra>'
+            text=[[optimistic_completion.strftime('%Y-%m-%d'), pessimistic_completion.strftime('%Y-%m-%d')]] * 2,
+            showlegend=False,
         ))
         
         # Add simple trend line from start to projected completion
@@ -262,6 +248,21 @@ class ChartBuilder:
             line=dict(color='orange', dash='dash', width=2),
             hovertemplate='Current velocity: %{text}<extra></extra>',
             text=[f"{velocity:.2f}/{ideal_velocity:.2f}"] * 2,
+        ))
+
+        # Add marker at the projected completion point
+        fig.add_trace(go.Scatter(
+            x=[projected_completion_date],
+            y=[today_scope],
+            name=f'Proj Done ({projected_completion_date.strftime("%Y-%m-%d")})',
+            mode='markers',
+            marker=dict(
+                size=12,
+                symbol='star',
+                color='orange',
+                line=dict(color='black', width=1)
+            ),
+            hovertemplate='Projected completion date: %{x}<br>%{y:.1f} days<extra></extra>'
         ))
         
         return fig
@@ -327,7 +328,7 @@ class ChartBuilder:
 
 
 def create_progress_chart(df: pd.DataFrame, scope_df: pd.DataFrame, chart_config: ChartConfig, 
-                          what_if_days: float = 0.0, velocity_multiplier: float = 1.0) -> go.Figure:
+                          what_if_days: float = 0.0, velocity_multiplier: float = 1.0) -> Tuple[go.Figure, Dict]:
     """Create and return the progress chart using Plotly."""
     # Prepare data for the chart
     data = VelocityCalculator.prepare_data_for_chart(df, scope_df, chart_config, what_if_days)
@@ -359,13 +360,18 @@ def create_progress_chart(df: pd.DataFrame, scope_df: pd.DataFrame, chart_config
     valid_data = complete_df[complete_df['cumulative_sum'] > 0].copy()
     velocity = VelocityCalculator.calculate_velocity(valid_data, chart_config.start_date)
     
+    # Dictionary to hold computed values that may be useful elsewhere
+    chart_metrics = {
+        'ideal_completion_date': pure_completion_date,
+        'projected_completion_date': None,  # Will set this below if available
+        'configured_hours_per_day': chart_config.hours_per_day,
+        'start_date': start_date,  # Add the start date
+    }
+
     # Create the Plotly figure
     fig = go.Figure()
     
-    # Add base traces in REVERSE order of desired legend appearance
-    fig = ChartBuilder.add_expected_progress_point(fig, today, expected_progress)
     fig = ChartBuilder.add_scope_line(fig, scope_df, today_scope)
-    fig = ChartBuilder.add_ideal_line(fig, start_date, pure_completion_date, today_scope)
     
     # Add velocity trend line if we have calculated velocity
     if velocity is not None and velocity > 0:
@@ -380,6 +386,10 @@ def create_progress_chart(df: pd.DataFrame, scope_df: pd.DataFrame, chart_config
             fig, start_date, projected_completion_date, optimistic_completion, 
             pessimistic_completion, today_scope, velocity, ideal_velocity
         )
+
+        # Store the projected completion date
+        chart_metrics['projected_completion_date'] = projected_completion_date
+
 
     # Add what-if velocity line if applicable
     what_if_velocity = None
@@ -407,13 +417,16 @@ def create_progress_chart(df: pd.DataFrame, scope_df: pd.DataFrame, chart_config
         # Add what-if trend line
         fig = ChartBuilder.add_what_if_trend(fig, start_date, what_if_completion_date, today_scope)
 
+    fig = ChartBuilder.add_ideal_line(fig, start_date, pure_completion_date, today_scope)
+    fig = ChartBuilder.add_expected_progress_point(fig, today, expected_progress)
+
     # Add completed work line (last to appear on top)
     fig = ChartBuilder.add_completed_line(fig, complete_df, completed_today)
     
     # Update layout
     fig = ChartBuilder.update_chart_layout(fig, chart_config, today_scope, completed_today)
     
-    return fig
+    return fig, chart_metrics
 
 
 def create_scope_change_barchart() -> go.Figure:
