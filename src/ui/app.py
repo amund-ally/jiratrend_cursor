@@ -1,6 +1,7 @@
 """Streamlit UI for the JiraTrend application."""
 import streamlit as st
 from datetime import datetime, timedelta
+import logging
 
 from src.config.jira_config import JiraConfig
 from src.config.chart_config import ChartConfig
@@ -83,8 +84,26 @@ def create_sidebar() -> tuple[JiraConfig, ChartConfig]:
         with st.form(key="chart_config_form"):
             chart_name = st.text_input("Configuration Name", value=st.session_state.chart_name)
             st.subheader("Burnup Settings")
-            hours_per_day = st.number_input("Hours per Day", min_value=0.0, max_value=24.0, 
-                                        value=st.session_state.hours_per_day, step=0.1)
+            
+            col1, col2 = st.columns(2)
+            with col1:
+                hours_per_person_per_day = st.number_input("Hours / Person / Day", 
+                                                     min_value=0.0, 
+                                                     max_value=12.0, 
+                                                     value=st.session_state.get("hours_per_person_per_day", 6.4),
+                                                     step=0.1,
+                                                     help="Productive hours each person works in a day")
+            with col2:
+                team_size = st.number_input("Team Size", 
+                                      min_value=1, 
+                                      max_value=20, 
+                                      value=st.session_state.get("team_size", 2),
+                                      step=1,
+                                      help="Number of people working on the project")
+            
+            # Show the calculated total
+            st.info(f"Total team capacity: {hours_per_person_per_day * team_size:.1f} hours per day")
+            
             start_date = st.date_input("Start Date", value=st.session_state.start_date)
             end_date = st.date_input("End Date", value=st.session_state.end_date)
             jira_query = st.text_area("JQL Query", value=st.session_state.jira_query, height=200)
@@ -97,7 +116,8 @@ def create_sidebar() -> tuple[JiraConfig, ChartConfig]:
                     try:
                         config = ChartConfig(
                             name=chart_name,
-                            hours_per_day=hours_per_day,
+                            hours_per_person_per_day=hours_per_person_per_day,
+                            team_size=team_size,
                             start_date=datetime.combine(start_date, datetime.min.time()),
                             end_date=datetime.combine(end_date, datetime.min.time()),
                             jira_query=jira_query
@@ -194,6 +214,9 @@ def display_metrics(metrics: dict, simulation: SimulationParams):
         metrics: Dictionary of calculated metrics
         simulation: Current simulation parameters
     """
+    logger = logging.getLogger(__name__)
+    logger.debug("display_metrics begin")
+
     col1, col2, col3, col4, col5, col6 = st.columns(6)  # Six columns
 
     with col1:
@@ -261,27 +284,37 @@ def display_metrics(metrics: dict, simulation: SimulationParams):
         # Calculate required hours per day
         required_hours = metrics.get('required_hours_per_day', 0)
         configured_hours = metrics.get('configured_hours_per_day', 8.0)
+        team_size = metrics.get('team_size', 1)
         
+        # Calculate per-person requirements
+        required_per_person = required_hours / team_size if team_size > 0 else required_hours
+        configured_per_person = configured_hours / team_size if team_size > 0 else configured_hours
+        logger.debug(f"Configured hours per person: {configured_per_person:.1f}, Required hours per person: {required_per_person:.1f}")
+        logger.debug(f"Configured hours: {configured_hours:.1f}, Required hours: {required_hours:.1f}")
+        logger.debug(f"Team size: {team_size}")
+        logger.debug(f"Required hours per day: {required_hours:.1f}")
+        logger.debug(f"Configured hours per day: {configured_hours:.1f}")
         # Calculate delta (positive when configured > required, negative when required > configured)
-        delta = configured_hours - required_hours
+        delta = configured_per_person - required_per_person
         
-        # Format strings
+        # Format strings showing per-person metrics
         if delta > 0:
-            delta_str = f"+{delta:.1f} hours"
-            help_text = f"Current pace is ahead of schedule. Could reduce to {required_hours:.1f} hours/day."
+            delta_str = f"+{delta:.1f} hours/person"
+            help_text = f"Current pace is ahead of schedule. Each person could reduce to {required_per_person:.1f} hours/day."
         elif delta < 0:
-            delta_str = f"{delta:.1f} hours"
-            help_text = f"Need to increase from {configured_hours:.1f} to {required_hours:.1f} hours/day to meet ideal date."
+            delta_str = f"{delta:.1f} hours/person"
+            help_text = f"Need to increase from {configured_per_person:.1f} to {required_per_person:.1f} hours/person/day to meet ideal date."
         else:
-            delta_str = "0.0 hours"
+            delta_str = "0.0 hours/person"
             help_text = "Current pace exactly matches what's needed for the ideal completion date."
         
         st.metric(
-            "Required Hours/Day",
-            f"{required_hours:.1f} hours",
+            "Required Hours/Person/Day",
+            f"{required_per_person:.1f} hours",
             delta=delta_str,
             help=help_text
         )
+    logger.debug("display_metrics end")
 
 
 def display_burnup_chart(project_data: ProjectData, chart_config: ChartConfig, simulation: SimulationParams):

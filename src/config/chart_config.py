@@ -3,14 +3,32 @@ import os
 from dataclasses import dataclass
 from datetime import datetime
 
-@dataclass
 class ChartConfig:
-    """Configuration class for chart settings."""
-    name: str
-    hours_per_day: float
-    start_date: datetime
-    end_date: datetime
-    jira_query: str
+    """Configuration for the chart display."""
+    
+    def __init__(self, name: str, hours_per_person_per_day: float, team_size: int,
+                 start_date: datetime, end_date: datetime, jira_query: str):
+        """Initialize chart configuration.
+        
+        Args:
+            name: Configuration name
+            hours_per_person_per_day: Productive hours one person works per day
+            team_size: Number of people in the team
+            start_date: Chart start date
+            end_date: Chart end date
+            jira_query: JQL query to fetch issues
+        """
+        self.name = name
+        self.hours_per_person_per_day = hours_per_person_per_day
+        self.team_size = team_size
+        self.start_date = start_date
+        self.end_date = end_date
+        self.jira_query = jira_query
+        
+    @property
+    def hours_per_day(self) -> float:
+        """Total team hours per day (for backward compatibility)."""
+        return self.hours_per_person_per_day * self.team_size
 
     @classmethod
     def from_config_file(cls, config_name: str) -> 'ChartConfig':
@@ -23,7 +41,8 @@ class ChartConfig:
         config.read(config_file)
         return cls(
             name=config['CHART']['name'],
-            hours_per_day=float(config['CHART']['hours_per_day']),
+            hours_per_person_per_day=float(config['CHART']['hours_per_person_per_day']),
+            team_size=int(config['CHART']['team_size']),
             start_date=datetime.strptime(config['CHART']['start_date'], '%Y-%m-%d'),
             end_date=datetime.strptime(config['CHART']['end_date'], '%Y-%m-%d'),
             jira_query=config['CHART']['jira_query']
@@ -37,7 +56,8 @@ class ChartConfig:
         config = configparser.ConfigParser()
         config['CHART'] = {
             'name': self.name,
-            'hours_per_day': str(self.hours_per_day),
+            'hours_per_person_per_day': str(self.hours_per_person_per_day),
+            'team_size': str(self.team_size),
             'start_date': self.start_date.strftime('%Y-%m-%d'),
             'end_date': self.end_date.strftime('%Y-%m-%d'),
             'jira_query': self.jira_query
@@ -59,4 +79,4 @@ class ChartConfig:
             if file.startswith('chart_') and file.endswith('.config'):
                 config_name = file[6:-7]  # Remove 'chart_' prefix and '.config' suffix
                 configs.append(config_name)
-        return sorted(configs) 
+        return sorted(configs)

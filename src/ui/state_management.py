@@ -1,8 +1,6 @@
 """UI state management for Streamlit."""
 from dataclasses import dataclass, field
 from datetime import datetime, timedelta
-from typing import Dict, List, Optional, Tuple, Any
-
 import streamlit as st
 
 from src.config.chart_config import ChartConfig
@@ -58,11 +56,12 @@ class StreamlitUIState:
     
     @staticmethod
     def update_chart_config_state(config: ChartConfig):
-        """Update session state from a ChartConfig object."""
+        """Update session state with chart configuration values."""
         st.session_state.chart_name = config.name
-        st.session_state.hours_per_day = config.hours_per_day
-        st.session_state.start_date = config.start_date
-        st.session_state.end_date = config.end_date
+        st.session_state.hours_per_person_per_day = config.hours_per_person_per_day
+        st.session_state.team_size = config.team_size
+        st.session_state.start_date = config.start_date.date()
+        st.session_state.end_date = config.end_date.date()
         st.session_state.jira_query = config.jira_query
     
     @staticmethod

@@ -131,14 +131,15 @@ class VelocityCalculator:
     def calculate_ideal_completion(start_date: datetime.date, today_scope: float, 
                                   hours_per_day: float) -> Tuple[datetime.date, float]:
         """Calculate ideal completion date based on scope and working pace."""
-        # Calculate total business days needed to complete the work
+        
+        # Calculate total business days needed to complete the work 
         total_days_needed = (today_scope * 8) / hours_per_day
         
         # Calculate pure completion date (no consideration of actual progress)
         pure_completion_date = np.busday_offset(start_date, int(np.ceil(total_days_needed)), roll='forward')
         pure_completion_date = pd.Timestamp(pure_completion_date).to_pydatetime().date()
         
-        # Calculate ideal velocity
+        # Calculate ideal velocity (days of work completed per calendar day)
         ideal_velocity = hours_per_day / 8
         
         return pure_completion_date, ideal_velocity
@@ -364,7 +365,9 @@ def create_progress_chart(df: pd.DataFrame, scope_df: pd.DataFrame, chart_config
     chart_metrics = {
         'ideal_completion_date': pure_completion_date,
         'projected_completion_date': None,  # Will set this below if available
-        'configured_hours_per_day': chart_config.hours_per_day,
+        'hours_per_person_per_day': chart_config.hours_per_person_per_day,
+        'team_size': chart_config.team_size,
+        'total_hours_per_day': chart_config.hours_per_day,
         'start_date': start_date,  # Add the start date
     }
 
