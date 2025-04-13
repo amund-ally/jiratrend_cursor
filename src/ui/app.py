@@ -87,22 +87,23 @@ def create_sidebar() -> tuple[JiraConfig, ChartConfig]:
             
             col1, col2 = st.columns(2)
             with col1:
-                hours_per_person_per_day = st.number_input("Hours / Person / Day", 
-                                                     min_value=0.0, 
-                                                     max_value=12.0, 
-                                                     value=st.session_state.get("hours_per_person_per_day", 6.4),
-                                                     step=0.1,
-                                                     help="Productive hours each person works in a day")
+                hours_per_person_per_day = st.number_input(
+                    "Hours / Person / Day", 
+                    min_value=0.0, 
+                    max_value=12.0, 
+                    value=st.session_state.hours_per_person_per_day,
+                    step=0.1,
+                    help="Productive hours each person works in a day",
+                )
             with col2:
-                team_size = st.number_input("Team Size", 
-                                      min_value=1, 
-                                      max_value=20, 
-                                      value=st.session_state.get("team_size", 2),
-                                      step=1,
-                                      help="Number of people working on the project")
-            
-            # Show the calculated total
-            st.info(f"Total team capacity: {hours_per_person_per_day * team_size:.1f} hours per day")
+                team_size = st.number_input(
+                    "Team Size", 
+                    min_value=1, 
+                    max_value=20, 
+                    value=st.session_state.team_size,
+                    step=1,
+                    help="Number of people working on the project",
+                )
             
             start_date = st.date_input("Start Date", value=st.session_state.start_date)
             end_date = st.date_input("End Date", value=st.session_state.end_date)
@@ -114,6 +115,9 @@ def create_sidebar() -> tuple[JiraConfig, ChartConfig]:
                     st.error("Please enter a configuration name")
                 else:
                     try:
+                        st.session_state.hours_per_person_per_day = hours_per_person_per_day
+                        st.session_state.team_size = team_size
+                                    
                         config = ChartConfig(
                             name=chart_name,
                             hours_per_person_per_day=hours_per_person_per_day,
@@ -214,10 +218,11 @@ def display_metrics(metrics: dict, simulation: SimulationParams):
         metrics: Dictionary of calculated metrics
         simulation: Current simulation parameters
     """
-    logger = logging.getLogger(__name__)
-    logger.debug("display_metrics begin")
+    required_hours = metrics.get('required_hours_per_day', 0)
+    configured_hours = metrics.get('configured_hours_per_day', 8.0)
+    team_size = metrics.get('team_size', 1)
 
-    col1, col2, col3, col4, col5, col6 = st.columns(6)  # Six columns
+    col1, col2, col3, col4 = st.columns(4)
 
     with col1:
         st.metric(
@@ -251,15 +256,32 @@ def display_metrics(metrics: dict, simulation: SimulationParams):
             delta_color=delta_color,
             help="Remaining work in days (accounting for 'what if' scenario if applicable)"
         )
-
     with col4:
+         # Calculate days until ideal date
+        weekdays_to_ideal_date = metrics.get('weekdays_to_ideal_date')
+        
+        # Text to display for the metric
+        if weekdays_to_ideal_date == 1:
+            value = "1 day"
+        else:
+            value = f"{weekdays_to_ideal_date} days"
+            
+        st.metric(
+            "Weekdays to Ideal Date",
+            value,
+            help=f"Business days remaining until ideal completion date"
+        )     
+
+
+    col1, col2, col3, col4 = st.columns(4) 
+
+    with col1:
         st.metric(
             "Weekdays Since Last Completed",
             f"{metrics['days_since_last_completed']} days",
             help="Weekdays since the last completed issue"
         )
-        
-    with col5:
+    with col2:
         # Calculate days off from ideal date
         days_off = metrics['days_off']
         # Format the value and determine color
@@ -269,52 +291,74 @@ def display_metrics(metrics: dict, simulation: SimulationParams):
         elif days_off < 0:
             value = f"Early"
             delta = f"{days_off} weekdays"
+            detal_color= "inverse"
         else:
             value = f"Late"
             delta = f"-{days_off} weekdays"
+            detal_color= "inverse"
         
         st.metric(
             "Schedule Variance",
             value,
             delta=delta,
+            delta_color=detal_color,
             help="Weekdays off from ideal completion date"
         )
         
-    with col6:
+    with col3:
         # Calculate required hours per day
-        required_hours = metrics.get('required_hours_per_day', 0)
-        configured_hours = metrics.get('configured_hours_per_day', 8.0)
-        team_size = metrics.get('team_size', 1)
         
         # Calculate per-person requirements
         required_per_person = required_hours / team_size if team_size > 0 else required_hours
         configured_per_person = configured_hours / team_size if team_size > 0 else configured_hours
-        logger.debug(f"Configured hours per person: {configured_per_person:.1f}, Required hours per person: {required_per_person:.1f}")
-        logger.debug(f"Configured hours: {configured_hours:.1f}, Required hours: {required_hours:.1f}")
-        logger.debug(f"Team size: {team_size}")
-        logger.debug(f"Required hours per day: {required_hours:.1f}")
-        logger.debug(f"Configured hours per day: {configured_hours:.1f}")
+
         # Calculate delta (positive when configured > required, negative when required > configured)
-        delta = configured_per_person - required_per_person
+        delta = required_per_person - configured_per_person
         
         # Format strings showing per-person metrics
         if delta > 0:
             delta_str = f"+{delta:.1f} hours/person"
-            help_text = f"Current pace is ahead of schedule. Each person could reduce to {required_per_person:.1f} hours/day."
+            delta_color = "inverse"
+            help_text = f"Need to increase from {configured_per_person:.1f} to {required_per_person:.1f} hours/person/day to meet ideal date."
         elif delta < 0:
             delta_str = f"{delta:.1f} hours/person"
-            help_text = f"Need to increase from {configured_per_person:.1f} to {required_per_person:.1f} hours/person/day to meet ideal date."
+            delta_color = "inverse"
+            help_text = f"Current pace is ahead of schedule. Each person could reduce to {required_per_person:.1f} hours/day."
         else:
             delta_str = "0.0 hours/person"
+            delta_color = "normal"
             help_text = "Current pace exactly matches what's needed for the ideal completion date."
         
         st.metric(
             "Required Hours/Person/Day",
             f"{required_per_person:.1f} hours",
             delta=delta_str,
+            delta_color=delta_color,
             help=help_text
         )
-    logger.debug("display_metrics end")
+    with col4:
+        # how many people are needed to meet the ideal date
+        additional_people = (required_hours - configured_hours) / configured_hours
+        new_team_size = team_size + additional_people
+
+        if required_hours > configured_hours:
+            value = f"{new_team_size:.1f} people"
+            delta_str = f"{additional_people:.1f} people"
+            delta_color = "inverse"
+            help_text = f"Need to increase from {team_size:.1f} to {new_team_size:.1f} people to meet ideal date."
+        else:
+            value = f"{new_team_size:.1f} people"
+            delta_str = f"{(additional_people):.1f} people"
+            delta_color = "inverse"
+            help_text = f"Current pace is ahead of schedule. Total people could reduce to {new_team_size:.1f}."
+
+        st.metric(
+            "Required Team Size",
+            value=value,
+            delta=delta_str,
+            delta_color=delta_color,
+            help=help_text
+        )
 
 
 def display_burnup_chart(project_data: ProjectData, chart_config: ChartConfig, simulation: SimulationParams):

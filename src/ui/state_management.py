@@ -16,8 +16,10 @@ class StreamlitUIState:
         """Initialize session state for chart configuration."""
         if 'chart_name' not in st.session_state:
             st.session_state.chart_name = ""
-        if 'hours_per_day' not in st.session_state:
-            st.session_state.hours_per_day = 12.8
+        if 'hours_per_person_per_day' not in st.session_state:
+            st.session_state.hours_per_person_per_day = None
+        if 'team_size' not in st.session_state:
+            st.session_state.team_size = None
         if 'start_date' not in st.session_state:
             st.session_state.start_date = (datetime.today() - timedelta(days=7))
         if 'end_date' not in st.session_state:
@@ -83,8 +85,9 @@ class StreamlitUIState:
     def create_chart_config_from_state() -> ChartConfig:
         """Create a ChartConfig object from current session state."""
         return ChartConfig(
-            name=st.session_state.chart_name,
-            hours_per_day=st.session_state.hours_per_day,
+            name=st.session_state.chart_name,          
+            hours_per_person_per_day=st.session_state.hours_per_person_per_day,
+            team_size=st.session_state.team_size,
             start_date=datetime.combine(st.session_state.start_date, datetime.min.time()) 
                 if isinstance(st.session_state.start_date, datetime.date) 
                 else st.session_state.start_date,
