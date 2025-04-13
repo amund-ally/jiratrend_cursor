@@ -47,7 +47,36 @@ def get_metrics_explanation() -> str:
     4. Use Accuracy % to set confidence intervals for future estimates
     """
 
+def save_chart_config():
+    """Save the current chart configuration to session state."""
+    try:
+        config_name = st.session_state.config_name
+        hours_per_person_per_day = st.session_state.hours_per_person_per_day
+        team_size = st.session_state.team_size
+        start_date = st.session_state.start_date
+        end_date = st.session_state.end_date
+        jira_query = st.session_state.jira_query
+        logging.debug(f"Saving config: {config_name}")
+        logging.debug(f"Hours per person: {hours_per_person_per_day}")
+        logging.debug(f"Team size: {team_size}")
+        logging.debug(f"Start date: {start_date}")
+        logging.debug(f"End date: {end_date}")
+        logging.debug(f"JQL: {jira_query}")
 
+        config = ChartConfig(
+            name=config_name,
+            hours_per_person_per_day=hours_per_person_per_day,
+            team_size=team_size,
+            start_date=datetime.combine(start_date, datetime.min.time()),
+            end_date=datetime.combine(end_date, datetime.min.time()),
+            jira_query=jira_query
+        )
+        config.save_to_config_file()
+        st.toast(f"Chart configuration '{config_name}' saved!")
+    except Exception as e:
+        st.error(f"Error saving configuration: {str(e)}")    
+
+    
 def create_sidebar() -> tuple[JiraConfig, ChartConfig]:
     """Create and manage the sidebar UI components.
     
@@ -70,7 +99,9 @@ def create_sidebar() -> tuple[JiraConfig, ChartConfig]:
             [""] + available_configs,
             format_func=lambda x: "Select a configuration..." if x == "" else x
         )
-        
+    
+        config = None
+
         if selected_config:
             try:
                 config = ChartConfig.from_config_file(selected_config)
@@ -79,58 +110,38 @@ def create_sidebar() -> tuple[JiraConfig, ChartConfig]:
                 st.toast(f"Loaded configuration: {selected_config}")
             except Exception as e:
                 st.error(f"Error loading configuration: {str(e)}")
-        
+    
         # Chart configuration input form
         with st.form(key="chart_config_form"):
-            chart_name = st.text_input("Configuration Name", value=st.session_state.chart_name)
+            st.text_input("Configuration Name", key="config_name")
+
             st.subheader("Burnup Settings")
             
             col1, col2 = st.columns(2)
             with col1:
-                hours_per_person_per_day = st.number_input(
+                st.number_input(
                     "Hours / Person / Day", 
                     min_value=0.0, 
                     max_value=12.0, 
-                    value=st.session_state.hours_per_person_per_day,
                     step=0.1,
                     help="Productive hours each person works in a day",
+                    key="hours_per_person_per_day",
                 )
             with col2:
-                team_size = st.number_input(
+                st.number_input(
                     "Team Size", 
                     min_value=1, 
                     max_value=20, 
-                    value=st.session_state.team_size,
                     step=1,
                     help="Number of people working on the project",
+                    key="team_size",
                 )
             
-            start_date = st.date_input("Start Date", value=st.session_state.start_date)
-            end_date = st.date_input("End Date", value=st.session_state.end_date)
-            jira_query = st.text_area("JQL Query", value=st.session_state.jira_query, height=200)
+            st.date_input("Start Date", key="start_date")
+            st.date_input("End Date", key="end_date")
+            st.text_area("JQL Query", height=200, key="jira_query")
             
-            submitted = st.form_submit_button("Save Chart Config")
-            if submitted:
-                if not chart_name:
-                    st.error("Please enter a configuration name")
-                else:
-                    try:
-                        st.session_state.hours_per_person_per_day = hours_per_person_per_day
-                        st.session_state.team_size = team_size
-                                    
-                        config = ChartConfig(
-                            name=chart_name,
-                            hours_per_person_per_day=hours_per_person_per_day,
-                            team_size=team_size,
-                            start_date=datetime.combine(start_date, datetime.min.time()),
-                            end_date=datetime.combine(end_date, datetime.min.time()),
-                            jira_query=jira_query
-                        )
-                        config.save_to_config_file()
-                        chart_config = config
-                        st.toast(f"Chart configuration '{chart_name}' saved!")
-                    except Exception as e:
-                        st.error(f"Error saving configuration: {str(e)}")
+            st.form_submit_button("Save Chart Config", on_click=save_chart_config)
     
     with tab2:
         st.header("JIRA Server Configuration")
@@ -158,13 +169,6 @@ def create_sidebar() -> tuple[JiraConfig, ChartConfig]:
                 config.save_to_config_file()
                 jira_config = config
                 st.toast("JIRA configuration saved!")
-    
-    # If config objects weren't created in the sidebar, create them from session state
-    if chart_config is None and st.session_state.chart_name:
-        try:
-            chart_config = ChartConfig.from_config_file(st.session_state.chart_name)
-        except Exception:
-            pass
     
     if jira_config is None:
         try:
@@ -291,11 +295,11 @@ def display_metrics(metrics: dict, simulation: SimulationParams):
         elif days_off < 0:
             value = f"Early"
             delta = f"{days_off} weekdays"
-            detal_color= "inverse"
+            detal_color= "normal"
         else:
             value = f"Late"
             delta = f"-{days_off} weekdays"
-            detal_color= "inverse"
+            detal_color= "normal"
         
         st.metric(
             "Schedule Variance",
