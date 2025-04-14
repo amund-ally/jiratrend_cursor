@@ -504,15 +504,6 @@ def display_issue_analysis(project_data: ProjectData):
     """
     st.subheader("Issue Analysis")
     
-    # Add explanatory text
-    st.info("""
-    This analysis shows how much time issues spend in each state. 
-    The chart below highlights issues that spend unusually long time in certain states.
-    
-    - Blue diamonds show average time in each state
-    - Red points indicate issues that took more than twice the average time
-    """)
-    
     col1, col2 = st.columns(2)
 
     with col1:
