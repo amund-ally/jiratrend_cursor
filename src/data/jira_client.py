@@ -57,17 +57,30 @@ class EstimateProcessor:
                 - Dictionary of current estimates
         """
         estimate_changes: Dict = {}
-        
+        ########## there is a bug that more-or-less starts in this function
+        # when Jira clones an issue, it takes the estimate of the issue it cloned
+        # but doesn't show that estimate in the history. 
+        # If the estimate for the issue is changed on the same day it was cloned,
+        # this function will record it as a single change on that day to the final value
+        # of the changes for that day. That means it'll miss recording the original estimate.
+        # Ideas to fix:
+        #  1) if estimate_changes was indexed by date and time rather than just date then all entries
+        #     would be recorded
+        #  2) this system could be changed to simply recording all changes across all days and not
+        #.    even worry about start date. the later functioning could group and do what it needs
+        #     relative to start date. 
+        # This method and how this is designed is a prime example of poor code from AI when compared
+        #    to what a good engineer would do. since the prompt included the notion of a start date
+        #    and time, the AI spread it everywhere.
+        ########## end bug talk
+
         # Initialize the estimate changes dict with an empty dict for start date
         start_date = chart_config.start_date.date()
         if start_date not in estimate_changes:
             estimate_changes[start_date] = {}
         
         for issue in issues:
-            # Get the current estimate from the issue's current state
             current_estimate = issue.fields.timeoriginalestimate / (3600 * 8) if issue.fields.timeoriginalestimate else 0
-            
-            # Check if the issue existed before the start date (created date)
             issue_created = pd.to_datetime(issue.fields.created).date()
             
             # First, find if this issue had an estimate before the start date
@@ -95,6 +108,22 @@ class EstimateProcessor:
                     if issue.fields.timeoriginalestimate and issue_created <= start_date:
                         # Assume the current estimate was set on creation if there's no history
                         estimate_on_start_date = current_estimate
+            else:
+                # Issue created after start_date: record its initial estimate on its creation date
+                # this has to be pulled from the history record for when the estimate changed
+                found_initial_estimate = False
+                for history in issue.changelog.histories:
+                    history_datetime = pd.to_datetime(history.created)
+                    if history_datetime.date() == issue_created:
+                        for item in reversed(history.items):
+                            if item.field == 'timeoriginalestimate':
+                                if issue_created not in estimate_changes:
+                                    estimate_changes[issue_created] = {}
+                                estimate_changes[issue_created][issue.key] = item.fromString
+                                found_initial_estimate = True
+                                break
+                    if found_initial_estimate:
+                        break
             
             # Add this issue's initial estimate to the start date ONLY if it had a value then
             if estimate_on_start_date > 0:
