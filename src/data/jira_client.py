@@ -1,6 +1,6 @@
 """Module for interacting with the JIRA API and processing JIRA data."""
 from collections import defaultdict
-from datetime import datetime
+from datetime import timedelta
 from typing import Dict, List, Tuple, NamedTuple, Optional
 import pandas as pd
 from jira import JIRA
@@ -79,6 +79,7 @@ class EstimateProcessor:
         if start_date not in estimate_changes:
             estimate_changes[start_date] = {}
         
+        first_pass_workaround = True
         for issue in issues:
             current_estimate = issue.fields.timeoriginalestimate / (3600 * 8) if issue.fields.timeoriginalestimate else 0
             issue_created = pd.to_datetime(issue.fields.created).date()
@@ -112,6 +113,19 @@ class EstimateProcessor:
                 # Issue created after start_date: record its initial estimate on its creation date
                 # this has to be pulled from the history record for when the estimate changed
                 found_initial_estimate = False
+
+                # work around for the cloning bug described at the top of this function
+                # this ensures the starting estimate for this story gets included and appropriately
+                # calculated. This can probably be genericized. 
+                if issue.key == "DS-13565":
+                    print(f"Handling special case for DS-13565")
+                    day_before = issue_created - timedelta(days=1)
+                    if day_before not in estimate_changes:
+                        estimate_changes[day_before] = {}
+                    if first_pass_workaround:
+                        estimate_changes[day_before][issue.key] = 4
+                        first_pass_workaround = False
+
                 for history in issue.changelog.histories:
                     history_datetime = pd.to_datetime(history.created)
                     if history_datetime.date() == issue_created:
@@ -150,6 +164,12 @@ class EstimateProcessor:
                     estimate_changes[change_date] = {}
                 estimate_changes[change_date][issue.key] = new_estimate
         
+        # Log the estimate changes for debugging
+        logger = logging.getLogger(__name__)
+        for date, changes in estimate_changes.items():
+            logger.debug(f"Estimate changes for date: {date}")
+            for key, estimate in changes.items():
+                logger.debug(f"  Issue {key}: {estimate}")
         return estimate_changes
     
     @staticmethod
